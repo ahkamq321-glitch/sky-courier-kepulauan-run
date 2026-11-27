@@ -1,357 +1,419 @@
-// The 3D bay: golden-hour sky, teal sea with waves, karst towers, islands with
-// palms, a lighthouse, runways and hazy mountains. Real depth: near / mid / far.
-import { LAYOUT } from './config.js';
+// The karst bay: sea, karst towers, islands, lighthouse, runway, mountains, sky, clouds.
+// One deterministic world (seeded RNG) with near / mid / far depth. Weather variants:
+// DUSK golden hour, STORM grey + rain, NIGHT dark + stars + lighthouse beam.
+import { WEATHER, mulberry32 } from './config.js';
 
-function std(color, roughness, metalness) {
-  return new THREE.MeshStandardMaterial({ color, roughness: roughness ?? 0.9, metalness: metalness ?? 0 });
+function skyTexture(w) {
+  const c = document.createElement('canvas');
+  c.width = 4; c.height = 256;
+  const x = c.getContext('2d');
+  const g = x.createLinearGradient(0, 0, 0, 256);
+  const hex = (n) => '#' + n.toString(16).padStart(6, '0');
+  g.addColorStop(0, hex(w.skyTop));
+  g.addColorStop(0.45, hex(w.skyMid));
+  g.addColorStop(0.75, hex(w.horizon));
+  g.addColorStop(1, hex(w.horizon));
+  x.fillStyle = g;
+  x.fillRect(0, 0, 4, 256);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
 }
 
-export function buildWorld(scene) {
-  // --- sky: gradient dome (orange horizon -> pink -> purple top) ---
-  const skyGeo = new THREE.SphereGeometry(3200, 24, 16);
-  const colors = [];
-  const pos = skyGeo.attributes.position;
-  const top = new THREE.Color(0x3a1a5e);
-  const mid = new THREE.Color(0xc94a6a);
-  const hor = new THREE.Color(0xff7a20);
-  for (let i = 0; i < pos.count; i++) {
-    const y = pos.getY(i) / 3200;
-    let c;
-    if (y > 0.25) c = mid.clone().lerp(top, (y - 0.25) / 0.75);
-    else c = hor.clone().lerp(mid, (y + 0.15) / 0.4);
-    colors.push(c.r, c.g, c.b);
-  }
-  skyGeo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-  const sky = new THREE.Mesh(skyGeo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false }));
-  scene.add(sky);
-  scene.fog = new THREE.Fog(0xd76a5a, 1200, 3600);
+export function buildWorld(weatherKey) {
+  const w = WEATHER[weatherKey] || WEATHER.DUSK;
+  const night = weatherKey === 'NIGHT';
+  const storm = weatherKey === 'STORM';
+  const g = new THREE.Group();
+  const rnd = mulberry32(20261127);
+  const mat = (c, r = 0.9, extra = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: r, metalness: 0.0, ...extra });
 
-  // --- lights: low warm sun (casts shadows) + soft sky/ground fill ---
-  const sunDir = LAYOUT.sunDir;
-  const sun = new THREE.DirectionalLight(0xffb36b, 1.35);
-  sun.position.set(sunDir.x * 1200, sunDir.y * 1200, sunDir.z * 1200);
-  sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
-  sun.shadow.camera.left = -260; sun.shadow.camera.right = 260;
-  sun.shadow.camera.top = 260; sun.shadow.camera.bottom = -260;
-  sun.shadow.camera.near = 100; sun.shadow.camera.far = 3000;
-  sun.shadow.bias = -0.0005;
-  scene.add(sun);
-  scene.add(sun.target);
-  scene.add(new THREE.HemisphereLight(0xd98aa8, 0x1f7f86, 0.55));
-  scene.add(new THREE.AmbientLight(0xffffff, 0.12));
+  // Sky dome: big sphere with a vertical gradient texture, seen from inside.
+  const sky = new THREE.Mesh(
+    new THREE.SphereGeometry(1900, 24, 16),
+    new THREE.MeshBasicMaterial({ map: skyTexture(w), side: THREE.BackSide, fog: false }),
+  );
+  g.add(sky);
+  // Fog for depth, matched to the horizon colour.
+  const fog = new THREE.Fog(w.fog, 260, 1500);
 
-  // --- sun disc + glow sprite, low on the horizon ---
-  const sunPos = new THREE.Vector3(sunDir.x * 2900, sunDir.y * 2900 + 60, sunDir.z * 2900);
-  const disc = new THREE.Mesh(new THREE.CircleGeometry(170, 32), new THREE.MeshBasicMaterial({ color: 0xffb03a, fog: false }));
-  disc.position.copy(sunPos);
-  disc.lookAt(0, 60, 0);
-  scene.add(disc);
-  const glowCanvas = document.createElement('canvas');
-  glowCanvas.width = 256; glowCanvas.height = 256;
-  const g = glowCanvas.getContext('2d');
-  const grad = g.createRadialGradient(128, 128, 0, 128, 128, 128);
-  grad.addColorStop(0, 'rgba(255, 200, 120, 0.85)');
-  grad.addColorStop(0.4, 'rgba(255, 160, 90, 0.35)');
-  grad.addColorStop(1, 'rgba(255, 160, 90, 0)');
-  g.fillStyle = grad; g.fillRect(0, 0, 256, 256);
-  const glowTex = new THREE.CanvasTexture(glowCanvas);
+  // Sun: bright emissive disc low on the horizon + a soft glow sprite.
+  const sun = new THREE.Mesh(
+    new THREE.CircleGeometry(night ? 26 : 46, 24),
+    new THREE.MeshBasicMaterial({ color: w.sunColor, fog: false }),
+  );
+  sun.position.set(w.sunPos[0], w.sunPos[1], w.sunPos[2]);
+  sun.lookAt(0, 60, 0);
+  g.add(sun);
+  const glowTex = (() => {
+    const c = document.createElement('canvas');
+    c.width = 128; c.height = 128;
+    const x = c.getContext('2d');
+    const gr = x.createRadialGradient(64, 64, 4, 64, 64, 64);
+    gr.addColorStop(0, 'rgba(255,220,160,0.9)');
+    gr.addColorStop(0.4, 'rgba(255,170,90,0.35)');
+    gr.addColorStop(1, 'rgba(255,150,60,0)');
+    x.fillStyle = gr;
+    x.fillRect(0, 0, 128, 128);
+    return new THREE.CanvasTexture(c);
+  })();
   const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, transparent: true, depthWrite: false, fog: false }));
-  glow.scale.set(1400, 1400, 1);
-  glow.position.copy(sunPos);
-  scene.add(glow);
+  glow.scale.set(420, 420, 1);
+  glow.position.copy(sun.position);
+  g.add(glow);
 
-  // --- sea: big plane with baked sine waves, teal, glossy for sun glitter ---
-  const seaGeo = new THREE.PlaneGeometry(6000, 6000, 72, 72);
-  seaGeo.rotateX(-Math.PI / 2);
-  const sp = seaGeo.attributes.position;
-  for (let i = 0; i < sp.count; i++) {
-    const x = sp.getX(i), z = sp.getZ(i);
-    sp.setY(i, Math.sin(x * 0.02) * 1.1 + Math.cos(z * 0.017 + x * 0.011) * 1.3 + Math.sin((x + z) * 0.008) * 0.9);
+  // Lights: warm directional sun (casts shadows) + hemisphere fill.
+  const sunLight = new THREE.DirectionalLight(w.light, w.lightIntensity);
+  sunLight.position.set(w.sunPos[0] * 0.4, Math.max(120, w.sunPos[1] * 1.6), w.sunPos[2] * 0.4 + 300);
+  sunLight.castShadow = true;
+  sunLight.shadow.mapSize.set(2048, 2048);
+  sunLight.shadow.camera.left = -160; sunLight.shadow.camera.right = 160;
+  sunLight.shadow.camera.top = 160; sunLight.shadow.camera.bottom = -160;
+  sunLight.shadow.camera.far = 1600;
+  g.add(sunLight);
+  g.add(new THREE.HemisphereLight(w.hemiSky, w.hemiGround, night ? 0.55 : 0.75));
+  if (!night) g.add(new THREE.AmbientLight(w.ambient, 0.25));
+
+  // Sea: large plane with gentle sine-wave displacement + sun glitter.
+  const seaGeo = new THREE.PlaneGeometry(4000, 4000, 48, 48);
+  const pos = seaGeo.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), y = pos.getY(i);
+    pos.setZ(i, Math.sin(x * 0.012) * 1.6 + Math.cos(y * 0.017) * 1.4 + Math.sin((x + y) * 0.006) * 1.1);
   }
   seaGeo.computeVertexNormals();
-  const sea = new THREE.Mesh(seaGeo, new THREE.MeshStandardMaterial({ color: 0x1b7f8c, roughness: 0.22, metalness: 0.55 }));
+  const sea = new THREE.Mesh(seaGeo, new THREE.MeshStandardMaterial({ color: w.sea, roughness: 0.35, metalness: 0.35 }));
+  sea.rotation.x = -Math.PI / 2;
   sea.receiveShadow = true;
-  scene.add(sea);
-  // Boats, buoys and whitecaps — break up the flat sea so it reads as water.
-  const boatHull = std(0x8a4a2a, 0.8, 0);
-  const boatSail = std(0xf5f2ea, 0.9, 0);
-  const buoyMat = new THREE.MeshBasicMaterial({ color: 0xff7a20 });
-  const foamMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.28 });
-  const boatSpots = [
-    { x: -260, z: 180, h: 0.6, s: 1 }, { x: 320, z: -140, h: -0.9, s: 1.3 },
-    { x: -80, z: -420, h: 2.2, s: 0.9 },
-  ];
-  for (const b of boatSpots) {
-    const boat = new THREE.Group();
-    const hull = new THREE.Mesh(new THREE.BoxGeometry(10 * b.s, 3 * b.s, 4 * b.s), boatHull);
-    hull.position.y = 1.5 * b.s; hull.castShadow = true;
-    const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 12 * b.s, 6), std(0x5a3a22, 0.9, 0));
-    mast.position.y = 8 * b.s;
-    const sail = new THREE.Mesh(new THREE.ConeGeometry(4 * b.s, 10 * b.s, 4), boatSail);
-    sail.position.set(0, 12 * b.s, -1 * b.s); sail.rotation.y = Math.PI / 4;
-    boat.add(hull, mast, sail);
-    boat.position.set(b.x, 1, b.z);
-    boat.rotation.y = b.h;
-    scene.add(boat);
-  }
-  for (const [bx, bz] of [[-140, 320], [180, 260], [60, -320], [-340, -80]]) {
-    const buoy = new THREE.Mesh(new THREE.SphereGeometry(2.2, 10, 8), buoyMat);
-    buoy.position.set(bx, 2, bz);
-    scene.add(buoy);
-  }
-  for (const [fx, fz, fr] of [[-200, 100, 26], [240, -60, 30], [40, 200, 22], [-60, -180, 28]]) {
-    const cap = new THREE.Mesh(new THREE.CircleGeometry(fr, 20), foamMat);
-    cap.rotation.x = -Math.PI / 2;
-    cap.position.set(fx, 2, fz);
-    scene.add(cap);
-  }
-  // Sun glitter path: a long soft streak on the water under the sun.
-  const streakCanvas = document.createElement('canvas');
-  streakCanvas.width = 512; streakCanvas.height = 128;
-  const sg = streakCanvas.getContext('2d');
-  sg.save();
-  sg.translate(256, 64); sg.scale(4, 1);
-  const sgrad = sg.createRadialGradient(0, 0, 0, 0, 0, 64);
-  sgrad.addColorStop(0, 'rgba(255, 220, 150, 0.9)');
-  sgrad.addColorStop(0.5, 'rgba(255, 190, 110, 0.35)');
-  sgrad.addColorStop(1, 'rgba(255, 190, 110, 0)');
-  sg.fillStyle = sgrad;
-  sg.fillRect(-64, -64, 128, 128);
-  sg.restore();
-  const streakTex = new THREE.CanvasTexture(streakCanvas);
+  g.add(sea);
+  // Sun-glitter path on the water under the low sun.
   const glitter = new THREE.Mesh(
-    new THREE.PlaneGeometry(2600, 420),
-    new THREE.MeshBasicMaterial({ map: streakTex, transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending, depthWrite: false })
+    new THREE.PlaneGeometry(120, 900),
+    new THREE.MeshBasicMaterial({ color: 0xffd9a0, transparent: true, opacity: night ? 0.0 : 0.28, blending: THREE.AdditiveBlending, depthWrite: false }),
   );
-  glitter.geometry.rotateX(-Math.PI / 2);
-  glitter.position.set(sunDir.x * 900, 1.5, sunDir.z * 900);
-  glitter.rotation.y = Math.atan2(-sunDir.z, sunDir.x);
-  scene.add(glitter);
+  glitter.rotation.x = -Math.PI / 2;
+  glitter.position.set(-180, 4.6, -450);
+  g.add(glitter);
 
-  // --- shared materials ---
-  const sand = std(0xe8d29a, 1, 0);
-  const grass = std(0x4d8a44, 1, 0);
-  const rockA = std(0xb98a68, 1, 0);
-  const rockB = std(0x7a5570, 1, 0);
-  const shrub = std(0x3f7a3a, 1, 0);
-  const trunkMat = std(0x7a5230, 1, 0);
-  const leafMat = std(0x2f7a33, 0.9, 0);
-
-  function palm(x, y, z, s) {
-    const p = new THREE.Group();
-    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.5 * s, 0.8 * s, 9 * s, 7), trunkMat);
-    trunk.position.y = 4.5 * s; trunk.castShadow = true;
-    p.add(trunk);
-    for (let i = 0; i < 5; i++) {
-      const leaf = new THREE.Mesh(new THREE.ConeGeometry(1.6 * s, 7 * s, 6), leafMat);
-      const a = (i / 5) * Math.PI * 2;
-      leaf.position.set(Math.cos(a) * 2.6 * s, 9.5 * s, Math.sin(a) * 2.6 * s);
-      leaf.rotation.z = Math.cos(a) * 1.1;
-      leaf.rotation.x = -Math.sin(a) * 1.1;
-      leaf.castShadow = true;
-      p.add(leaf);
-    }
-    p.position.set(x, y, z);
-    return p;
-  }
-
-  // --- karst towers: tapered rock columns with green caps, casting shadows ---
-  LAYOUT.karst.forEach((k, idx) => {
-    const tower = new THREE.Mesh(new THREE.CylinderGeometry(k.r * 0.45, k.r, k.h, 10), idx % 2 === 0 ? rockA : rockB);
-    tower.position.set(k.x, k.h / 2 - 4, k.z);
-    tower.castShadow = true; tower.receiveShadow = true;
-    scene.add(tower);
-    const band = new THREE.Mesh(new THREE.CylinderGeometry(k.r * 0.72, k.r * 0.78, k.h * 0.14, 10), std(0x8a6a52, 1, 0));
-    band.position.set(k.x, k.h * 0.55 - 4, k.z);
-    scene.add(band);
-    const cap = new THREE.Mesh(new THREE.SphereGeometry(k.r * 0.55, 10, 8), shrub);
-    cap.scale.y = 0.45;
-    cap.position.set(k.x, k.h - 2, k.z);
-    cap.castShadow = true;
-    scene.add(cap);
-  });
-
-  // --- round islands: flat-topped sand + grass, foam ring, palms ---
-  // (Skip the spots that carry a hop strip — the strip platform is the island there.)
-  const stripSpots = LAYOUT.hopStrips;
-  for (const isl of LAYOUT.islands) {
-    if (stripSpots.some(h => Math.abs(h.x - isl.x) < 5 && Math.abs(h.z - isl.z) < 5)) continue;
-    const rim = new THREE.Mesh(new THREE.CylinderGeometry(isl.r, isl.r * 1.08, 4, 20), sand);
-    rim.position.set(isl.x, 2, isl.z);
-    rim.receiveShadow = true;
-    const top = new THREE.Mesh(new THREE.CylinderGeometry(isl.r * 0.96, isl.r * 0.98, 2.5, 20), grass);
-    top.position.set(isl.x, 5, isl.z);
-    top.receiveShadow = true;
-    const foam = new THREE.Mesh(new THREE.RingGeometry(isl.r * 1.05, isl.r * 1.3, 24),
-      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35 }));
-    foam.rotation.x = -Math.PI / 2;
-    foam.position.set(isl.x, 0.8, isl.z);
-    scene.add(rim, top, foam);
-    scene.add(palm(isl.x + isl.r * 0.3, 6.2, isl.z + isl.r * 0.2, 1.2));
-    scene.add(palm(isl.x - isl.r * 0.35, 6.2, isl.z - isl.r * 0.25, 1.0));
-  }
-
-  // --- lighthouse island (flat top), lighthouse, landing pad ---
-  const li = LAYOUT.lighthouseIsland;
-  const liRim = new THREE.Mesh(new THREE.CylinderGeometry(li.r, li.r * 1.08, 4, 24), sand);
-  liRim.position.set(li.x, 2, li.z);
-  liRim.receiveShadow = true;
-  const liTop = new THREE.Mesh(new THREE.CylinderGeometry(li.r * 0.96, li.r * 0.98, 2.5, 24), grass);
-  liTop.position.set(li.x, 5, li.z);
-  liTop.receiveShadow = true;
-  const liFoam = new THREE.Mesh(new THREE.RingGeometry(li.r * 1.05, li.r * 1.3, 28),
-    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35 }));
-  liFoam.rotation.x = -Math.PI / 2;
-  liFoam.position.set(li.x, 0.8, li.z);
-  scene.add(liRim, liTop, liFoam);
-  // Beach hut + wooden dock on the lighthouse island.
-  const hut = new THREE.Group();
-  const hutBase = new THREE.Mesh(new THREE.BoxGeometry(10, 6, 8), std(0xc9a06a, 1, 0));
-  hutBase.position.y = 3; hutBase.castShadow = true;
-  const hutRoof = new THREE.Mesh(new THREE.ConeGeometry(8, 5, 4), std(0x8a4a2a, 1, 0));
-  hutRoof.position.y = 8.5; hutRoof.rotation.y = Math.PI / 4; hutRoof.castShadow = true;
-  hut.add(hutBase, hutRoof);
-  hut.position.set(li.x + 38, 6.2, li.z - 42);
-  scene.add(hut);
-  const dock = new THREE.Group();
-  for (let i = 0; i < 5; i++) {
-    const plank = new THREE.Mesh(new THREE.BoxGeometry(3, 0.6, 8), std(0x7a5230, 1, 0));
-    plank.position.set(0, 1, i * 9);
-    dock.add(plank);
-  }
-  dock.position.set(li.x - 65, 2.5, li.z + 55);
-  dock.rotation.y = 0.5;
-  scene.add(dock);
-  scene.add(palm(li.x - 50, 6.2, li.z + 40, 1.4));
-  scene.add(palm(li.x + 55, 6.2, li.z + 30, 1.2));
-  // Lighthouse: stacked red/white bands, dark lamp room, glowing lamp.
-  const lh = new THREE.Group();
-  const bandH = 12;
-  for (let i = 0; i < 4; i++) {
-    const rTop = 4.4 - i * 0.45, rBot = 4.9 - i * 0.45;
-    const band = new THREE.Mesh(new THREE.CylinderGeometry(rTop, rBot, bandH, 14),
-      i % 2 === 0 ? std(0xd23b2e, 0.7, 0) : std(0xf5f2ea, 0.7, 0));
-    band.position.y = i * bandH + bandH / 2;
-    band.castShadow = true;
-    lh.add(band);
-  }
-  const lampRoom = new THREE.Mesh(new THREE.CylinderGeometry(3.8, 3.8, 5, 12), std(0x222831, 0.4, 0.4));
-  lampRoom.position.y = 4 * bandH + 2.5;
-  const lamp = new THREE.Mesh(new THREE.SphereGeometry(2.2, 12, 10), new THREE.MeshBasicMaterial({ color: 0xffe9a8 }));
-  lamp.position.y = 4 * bandH + 2.5;
-  const capTop = new THREE.Mesh(new THREE.ConeGeometry(4.4, 4, 12), std(0x222831, 0.5, 0.3));
-  capTop.position.y = 4 * bandH + 7;
-  lh.add(lampRoom, lamp, capTop);
-  lh.position.set(LAYOUT.lighthouse.x, 6.2, LAYOUT.lighthouse.z);
-  scene.add(lh);
-  // Landing pad: dark circle with a white ring, beside the lighthouse.
-  const pad = new THREE.Mesh(new THREE.CircleGeometry(16, 28), std(0x2c2c34, 0.9, 0));
-  pad.rotation.x = -Math.PI / 2;
-  pad.position.set(LAYOUT.pad.x, 6.4, LAYOUT.pad.z);
-  pad.receiveShadow = true;
-  const padRing = new THREE.Mesh(new THREE.RingGeometry(12, 15, 28), new THREE.MeshBasicMaterial({ color: 0xffffff }));
-  padRing.rotation.x = -Math.PI / 2;
-  padRing.position.set(LAYOUT.pad.x, 6.5, LAYOUT.pad.z);
-  scene.add(pad, padRing);
-
-  // --- runways: sand platform + asphalt + centre line + threshold bars ---
-  function buildStrip(x, z, heading, length, width) {
-    const g = new THREE.Group();
-    const platform = new THREE.Mesh(new THREE.BoxGeometry(length + 50, 4, width + 26), sand);
-    platform.position.y = 2;
-    platform.receiveShadow = true;
-    g.add(platform);
-    const surface = new THREE.Mesh(new THREE.BoxGeometry(length, 1, width * 0.55), std(0x2c2c34, 0.95, 0));
-    surface.position.y = 4.4;
-    surface.receiveShadow = true;
-    g.add(surface);
-    const centre = new THREE.Mesh(new THREE.BoxGeometry(length * 0.9, 0.3, 1.2), new THREE.MeshBasicMaterial({ color: 0xffffff }));
-    centre.position.y = 5.0;
-    g.add(centre);
-    for (const s of [-1, 1]) {
-      const bar = new THREE.Mesh(new THREE.BoxGeometry(2, 0.3, width * 0.45), new THREE.MeshBasicMaterial({ color: 0xffffff }));
-      bar.position.set(s * (length / 2 - 8), 5.0, 0);
-      g.add(bar);
-    }
-    g.position.set(x, 0, z);
-    g.rotation.y = heading;
-    scene.add(g);
-    return g;
-  }
-  buildStrip(LAYOUT.strip.x, LAYOUT.strip.z, LAYOUT.strip.heading, LAYOUT.strip.length, 34);
-  // Windsock at the main strip: pole + orange cone.
-  const sockPole = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 26, 8), std(0xdddddd, 0.6, 0.4));
-  sockPole.position.set(LAYOUT.strip.x + 40, 13, LAYOUT.strip.z + 30);
-  sockPole.castShadow = true;
-  const sock = new THREE.Mesh(new THREE.ConeGeometry(3, 12, 10), std(0xff7a20, 0.8, 0));
-  sock.rotation.z = Math.PI / 2 - 0.25;
-  sock.position.set(LAYOUT.strip.x + 46, 25, LAYOUT.strip.z + 30);
-  sock.castShadow = true;
-  scene.add(sockPole, sock);
-  for (const h of LAYOUT.hopStrips) buildStrip(h.x, h.z, h.heading, h.length, 26);
-
-  // --- mountains: big dark cones far away, hazed by the fog ---
-  const mtnMat = std(0x7a5a8a, 1, 0);
-  for (const m of LAYOUT.mountains) {
-    const h = m.h * 0.55;
-    const cone = new THREE.Mesh(new THREE.ConeGeometry(m.r, h, 7), mtnMat);
-    cone.position.set(m.x, h / 2 - 30, m.z);
-    scene.add(cone);
-    const cone2 = new THREE.Mesh(new THREE.ConeGeometry(m.r * 0.6, h * 0.75, 7), mtnMat);
-    cone2.position.set(m.x + m.r * 0.7, h * 0.375 - 30, m.z + 100);
-    scene.add(cone2);
-    const snow = new THREE.Mesh(new THREE.ConeGeometry(m.r * 0.34, h * 0.32, 7), std(0xffffff, 0.9, 0));
-    snow.position.set(m.x, h * 0.84 - 30, m.z);
-    scene.add(snow);
-  }
-
-  // --- clouds: clusters of flattened cream spheres, drifting slowly ---
-  const cloudMat = new THREE.MeshStandardMaterial({ color: 0xffe8d8, roughness: 1, metalness: 0, emissive: 0x604040, emissiveIntensity: 0.25 });
-  const clouds = [];
-  const cloudSpots = [
-    { x: -600, y: 320, z: -800, s: 1.6 }, { x: 500, y: 380, z: -1200, s: 2.0 },
-    { x: -200, y: 300, z: 600, s: 1.3 }, { x: 900, y: 340, z: 300, s: 1.8 },
-    { x: -1200, y: 360, z: 200, s: 2.2 }, { x: 100, y: 420, z: -1800, s: 2.4 },
-    { x: -800, y: 300, z: -1600, s: 1.5 }, { x: 1400, y: 380, z: -600, s: 1.7 },
+  // Karst towers: tall cones framing the flight path left and right, with strata bands.
+  const karstMat = mat(0x9a7a5e, 1.0);
+  const karstDark = mat(0x6e5340, 1.0);
+  const shrubMat = mat(0x3a7a3a, 1.0);
+  const towers = [];
+  const towerSpots = [
+    [-98, -30, 72, 26], [92, -60, 82, 30], [-105, -140, 95, 34], [98, -180, 78, 28],
+    [-88, -260, 66, 24], [95, -300, 88, 32], [-100, -380, 75, 26], [98, -440, 68, 24],
+    [-85, -520, 60, 22], [92, -580, 72, 26],
   ];
-  for (const c of cloudSpots) {
-    const g = new THREE.Group();
-    const puffs = [[0, 0, 0, 60], [55, -8, 10, 44], [-55, -6, -8, 48], [20, 14, -12, 40], [-25, 12, 12, 38]];
-    for (const [px, py, pz, pr] of puffs) {
-      const s = new THREE.Mesh(new THREE.SphereGeometry(pr, 12, 10), cloudMat);
-      s.position.set(px * c.s, py * c.s, pz * c.s);
-      s.scale.y = 0.55;
-      g.add(s);
+  for (const [tx, tz, th, tr] of towerSpots) {
+    const tower = new THREE.Group();
+    const cone = new THREE.Mesh(new THREE.CylinderGeometry(tr * 0.22, tr, th, 16), karstMat);
+    cone.position.y = th / 2;
+    cone.castShadow = true;
+    cone.receiveShadow = true;
+    tower.add(cone);
+    // Rock strata: thin darker rings around the tower.
+    for (let s = 1; s <= 5; s++) {
+      const band = new THREE.Mesh(new THREE.CylinderGeometry(tr * (0.72 - s * 0.12), tr * (0.78 - s * 0.12), 2.2, 10), karstDark);
+      band.position.y = (th * s) / 6;
+      tower.add(band);
     }
-    g.position.set(c.x, c.y, c.z);
-    scene.add(g);
-    clouds.push(g);
+    const cap = new THREE.Mesh(new THREE.ConeGeometry(tr * 0.3, th * 0.16, 8), shrubMat);
+    cap.position.y = th + th * 0.06;
+    tower.add(cap);
+    // Shrub blobs on the tower flanks so the rock is not a bare cone.
+    for (let b = 0; b < 2; b++) {
+      const blob = new THREE.Mesh(new THREE.SphereGeometry(tr * 0.16, 7, 5), shrubMat);
+      const ba = rnd() * Math.PI * 2;
+      blob.position.set(Math.cos(ba) * tr * 0.55, th * (0.3 + b * 0.35), Math.sin(ba) * tr * 0.55);
+      blob.scale.y = 0.6;
+      tower.add(blob);
+    }
+    tower.position.set(tx, 0, tz);
+    tower.rotation.z = (rnd() - 0.5) * 0.06;
+    g.add(tower);
+    towers.push(tower);
   }
-  // Birds: small dark V shapes drifting over the bay (static — screenshots are frozen).
-  const birdMat = new THREE.MeshBasicMaterial({ color: 0x2a2a3a });
-  for (let i = 0; i < 6; i++) {
-    const bird = new THREE.Group();
-    const w1 = new THREE.Mesh(new THREE.BoxGeometry(4.5, 0.35, 1.0), birdMat);
-    w1.rotation.z = 0.5; w1.position.x = -2.0;
-    const w2 = new THREE.Mesh(new THREE.BoxGeometry(4.5, 0.35, 1.0), birdMat);
-    w2.rotation.z = -0.5; w2.position.x = 2.0;
-    bird.add(w1, w2);
-    bird.position.set(-500 + i * 220, 175 + (i % 3) * 18, -100 + (i % 2) * 300);
-    scene.add(bird);
+  // Foam rings where the towers meet the sea.
+  const foamMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false });
+  for (const [tx, tz, th, tr] of towerSpots) {
+    const foam = new THREE.Mesh(new THREE.RingGeometry(tr * 1.02, tr * 1.25, 20), foamMat);
+    foam.rotation.x = -Math.PI / 2;
+    foam.position.set(tx, 2.4, tz);
+    g.add(foam);
   }
 
-  return {
-    update(dt, t, planePos) {
-      for (const c of clouds) {
-        c.position.x += dt * 2;
-        if (c.position.x > 2200) c.position.x = -2200;
+  // Islands: flattened cylinders with sand rims, green tops and palm trees.
+  function island(x, z, r, withPalms) {
+    const isl = new THREE.Group();
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(r, r * 1.15, 6, 18), mat(0xd8c08a, 1.0));
+    base.position.y = 1;
+    base.receiveShadow = true;
+    isl.add(base);
+    const top = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.94, r * 0.98, 2.5, 18), mat(0x3f7a44, 1.0));
+    top.position.y = 4.5;
+    top.receiveShadow = true;
+    isl.add(top);
+    if (withPalms) {
+      for (let i = 0; i < 3; i++) {
+        const a = (i / 3) * Math.PI * 2 + 0.5;
+        const px = Math.cos(a) * r * 0.55, pz = Math.sin(a) * r * 0.55;
+        const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.8, 9, 6), mat(0x6e4a2a, 1.0));
+        trunk.position.set(px, 10, pz);
+        trunk.rotation.z = 0.15;
+        isl.add(trunk);
+        const crown = new THREE.Mesh(new THREE.SphereGeometry(3.2, 8, 6), mat(0x2a6a2a, 1.0));
+        crown.scale.set(1.6, 0.6, 1.6);
+        crown.position.set(px + 1, 15, pz);
+        isl.add(crown);
       }
-      // Keep the shadow frustum centred on the plane.
-      sun.position.set(planePos.x + sunDir.x * 1200, planePos.y + sunDir.y * 1200 + 80, planePos.z + sunDir.z * 1200);
-      sun.target.position.set(planePos.x, planePos.y, planePos.z);
-      sun.target.updateMatrixWorld();
-      glitter.material.opacity = 0.42 + Math.sin(t * 0.7) * 0.08;
-    },
-  };
+    }
+    isl.position.set(x, 0, z);
+    g.add(isl);
+    return isl;
+  }
+  island(-95, -40, 26, true);
+  island(95, -260, 30, true);
+  island(-110, -330, 22, false);
+  island(120, 60, 20, true);
+
+  // Lighthouse island: big island with the red-white lighthouse, landing pad, beach hut,
+  // wooden dock and windsock. The lighthouse sits RIGHT of the flight path (x +58).
+  const lightIsland = island(58, -150, 34, false);
+  const lh = new THREE.Group();
+  const bandMat = (c) => mat(c, 0.7);
+  let lhY = 5;
+  for (let i = 0; i < 4; i++) {
+    const seg = new THREE.Mesh(new THREE.CylinderGeometry(4.6 - i * 0.55, 5.2 - i * 0.55, 7, 12), bandMat(i % 2 ? 0xc22e2e : 0xf2ede2));
+    seg.position.y = lhY + 3.5;
+    seg.castShadow = true;
+    lh.add(seg);
+    lhY += 7;
+  }
+  const lampRoom = new THREE.Mesh(new THREE.CylinderGeometry(3.4, 3.4, 4, 12), mat(0x22262e, 0.5));
+  lampRoom.position.y = lhY + 2;
+  lh.add(lampRoom);
+  const lamp = new THREE.Mesh(
+    new THREE.SphereGeometry(night ? 2.8 : 2.2, 12, 8),
+    new THREE.MeshBasicMaterial({ color: night ? 0xfff2b0 : 0xffe9a0 }),
+  );
+  lamp.position.y = lhY + 2;
+  lh.add(lamp);
+  const roof = new THREE.Mesh(new THREE.ConeGeometry(4.2, 3.4, 12), mat(0x22262e, 0.6));
+  roof.position.y = lhY + 5.5;
+  lh.add(roof);
+  // Gallery railing + lit windows so the lighthouse reads as a building, not a striped cone.
+  const rail = new THREE.Mesh(new THREE.TorusGeometry(3.9, 0.12, 6, 16), mat(0x22262e, 0.6));
+  rail.rotation.x = Math.PI / 2;
+  rail.position.y = lhY + 0.4;
+  lh.add(rail);
+  for (let wi = 0; wi < 3; wi++) {
+    const win = new THREE.Mesh(new THREE.BoxGeometry(1.0, 1.4, 0.2), new THREE.MeshBasicMaterial({ color: night ? 0xffe9a0 : 0x1a2a3a }));
+    win.position.set(0, 9 + wi * 7, 4.9 - wi * 0.5);
+    lh.add(win);
+  }
+  lh.position.set(0, 0, 0);
+  lightIsland.add(lh);
+  // Rotating beam: a spotlight + a visible translucent cone.
+  const beam = new THREE.SpotLight(0xfff2b0, night ? 4.0 : 0.0, 900, 0.22, 0.45, 0.6);
+  beam.position.set(58, lhY + 7, -150);
+  beam.target.position.set(58, 20, -400);
+  g.add(beam);
+  g.add(beam.target);
+  const beamCone = new THREE.Mesh(
+    new THREE.ConeGeometry(16, 260, 12, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0xfff2b0, transparent: true, opacity: night ? 0.22 : 0.0, side: THREE.DoubleSide, depthWrite: false }),
+  );
+  beamCone.rotation.x = Math.PI / 2 - 0.06;
+  beamCone.position.set(58, lhY + 7, -280);
+  g.add(beamCone);
+  // Landing pad + supply crate + parachute (Mail Run detail, below-and-beside the lighthouse).
+  const pad = new THREE.Mesh(new THREE.CylinderGeometry(9, 9, 1.2, 16), mat(0x3a3f46, 0.9));
+  pad.position.set(58, 5.6, -118);
+  pad.receiveShadow = true;
+  g.add(pad);
+  const crate = new THREE.Mesh(new THREE.BoxGeometry(4, 4, 4), mat(0x8a6a3a, 0.9));
+  crate.position.set(48, 8.5, -112);
+  crate.castShadow = true;
+  g.add(crate);
+  const chute = new THREE.Group();
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(7, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0xc22e2e, roughness: 0.7, side: THREE.DoubleSide }));
+  dome.position.y = 30;
+  chute.add(dome);
+  const chuteCrate = new THREE.Mesh(new THREE.BoxGeometry(3.4, 3.4, 3.4), mat(0x8a6a3a, 0.9));
+  chuteCrate.position.y = 22;
+  chute.add(chuteCrate);
+  chute.position.set(30, 52, -195);
+  if (weatherKey === 'DUSK') g.add(chute); // Mail Run detail only — at night it reads as a stray red dome.
+  // Beach hut (pyramid roof) + wooden dock on the lighthouse island.
+  const hut = new THREE.Group();
+  const hutBase = new THREE.Mesh(new THREE.BoxGeometry(8, 5, 7), mat(0x9a7a52, 0.9));
+  hutBase.position.y = 8;
+  hut.add(hutBase);
+  const hutRoof = new THREE.Mesh(new THREE.ConeGeometry(6.4, 4.5, 4), mat(0x6e4a2a, 0.9));
+  hutRoof.position.y = 12.8;
+  hutRoof.rotation.y = Math.PI / 4;
+  hut.add(hutRoof);
+  hut.position.set(74, 0, -132);
+  g.add(hut);
+  const dock = new THREE.Mesh(new THREE.BoxGeometry(3, 0.8, 26), mat(0x6e4a2a, 0.9));
+  dock.position.set(40, 4.5, -128);
+  g.add(dock);
+
+  // Runway: coastal strip on a flat island, with centre line + threshold marks + windsock.
+  const strip = new THREE.Mesh(new THREE.BoxGeometry(16, 1.5, 230), mat(0x2e3238, 0.95));
+  strip.position.set(0, 2.5, -60);
+  strip.receiveShadow = true;
+  g.add(strip);
+  for (let i = 0; i < 9; i++) {
+    const mark = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.2, 9), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+    mark.position.set(0, 3.4, -160 + i * 25);
+    g.add(mark);
+  }
+  // Runway edge lights so the strip reads in the cockpit approach shot.
+  const edgeMat = new THREE.MeshBasicMaterial({ color: 0xffc27a });
+  for (let i = 0; i < 10; i++) {
+    for (const ex of [-8, 8]) {
+      const edge = new THREE.Mesh(new THREE.SphereGeometry(0.7, 8, 6), edgeMat);
+      edge.position.set(ex, 3.6, -170 + i * 25);
+      g.add(edge);
+    }
+  }
+  const sockPole = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 12, 6), mat(0x888888, 0.6));
+  sockPole.position.set(14, 8, 20);
+  g.add(sockPole);
+  const sock = new THREE.Mesh(new THREE.ConeGeometry(1.6, 7, 8), mat(0xff7a1a, 0.7));
+  sock.rotation.z = -Math.PI / 2;
+  sock.position.set(18, 13.5, 20);
+  g.add(sock);
+
+  // Mountains: two far ridges of hazy purple cones with snow caps.
+  const mtnMat = mat(night ? 0x1a2038 : 0x6a4a6a, 1.0);
+  const snowMat = mat(0xe8e8f0, 0.9);
+  for (let i = 0; i < 7; i++) {
+    const mx = -700 + i * 230 + rnd() * 60;
+    const mh = 220 + rnd() * 160;
+    const m = new THREE.Mesh(new THREE.ConeGeometry(150 + rnd() * 80, mh, 7), mtnMat);
+    m.position.set(mx, mh / 2 - 10, -1150 - rnd() * 150);
+    g.add(m);
+    const cap = new THREE.Mesh(new THREE.ConeGeometry(52, 60, 7), snowMat);
+    cap.position.set(mx, mh - 38, -1150 - rnd() * 150);
+    g.add(cap);
+  }
+
+  // Clouds: groups of flattened white/cream spheres at several heights, drifting slowly.
+  const clouds = new THREE.Group();
+  const cloudMat = new THREE.MeshStandardMaterial({ color: w.cloud, roughness: 1, transparent: true, opacity: night ? 0.35 : 0.85 });
+  for (let i = 0; i < 12; i++) {
+    const cl = new THREE.Group();
+    const n = 4 + Math.floor(rnd() * 3);
+    for (let j = 0; j < n; j++) {
+      const s = new THREE.Mesh(new THREE.SphereGeometry(14 + rnd() * 16, 8, 6), cloudMat);
+      s.scale.y = 0.45;
+      s.position.set(j * 18 - n * 9, rnd() * 6, rnd() * 10 - 5);
+      cl.add(s);
+    }
+    cl.position.set(-450 + rnd() * 900, 150 + rnd() * 90, -100 - rnd() * 700);
+    clouds.add(cl);
+  }
+  g.add(clouds);
+
+  // Birds: small dark V shapes in the sky.
+  const birds = new THREE.Group();
+  const birdMat = new THREE.MeshBasicMaterial({ color: 0x222222, side: THREE.DoubleSide });
+  for (let i = 0; i < 6; i++) {
+    const b = new THREE.Group();
+    for (const s of [-1, 1]) {
+      const wing = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 0.5), birdMat);
+      wing.position.x = s * 1.6;
+      wing.rotation.z = s * 0.5;
+      b.add(wing);
+    }
+    b.position.set(-120 + i * 45, 175 + (i % 3) * 12, -80 - i * 40);
+    birds.add(b);
+  }
+  g.add(birds);
+
+  // Sea details: whitecaps, sailboats, orange buoys.
+  const capMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5 });
+  for (let i = 0; i < 4; i++) {
+    const wc = new THREE.Mesh(new THREE.CircleGeometry(9 + rnd() * 8, 10), capMat);
+    wc.rotation.x = -Math.PI / 2;
+    wc.position.set(-160 + i * 90, 2.2, 40 - i * 90);
+    g.add(wc);
+  }
+  for (let i = 0; i < 3; i++) {
+    const boat = new THREE.Group();
+    const hull = new THREE.Mesh(new THREE.BoxGeometry(3, 1.6, 9), mat(0xf2ede2, 0.6));
+    hull.position.y = 1.5;
+    boat.add(hull);
+    const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 11, 6), mat(0x6e4a2a, 0.8));
+    mast.position.y = 7;
+    boat.add(mast);
+    const sail = new THREE.Mesh(new THREE.PlaneGeometry(5, 8), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8, side: THREE.DoubleSide }));
+    sail.position.set(0, 8, -1.5);
+    boat.add(sail);
+    boat.position.set(-140 + i * 130, 1, 90 - i * 130);
+    boat.rotation.y = rnd() * 1.2 - 0.6;
+    g.add(boat);
+  }
+  const buoyMat = new THREE.MeshStandardMaterial({ color: 0xff6a1a, roughness: 0.6 });
+  for (const [bx, bz] of [[-30, 30], [34, -20], [-44, -120], [40, -240]]) {
+    const buoy = new THREE.Mesh(new THREE.ConeGeometry(2.2, 4.5, 8), buoyMat);
+    buoy.position.set(bx, 3.5, bz);
+    g.add(buoy);
+  }
+
+  // Night extras: stars + moon glow.
+  let stars = null;
+  if (night) {
+    const starGeo = new THREE.BufferGeometry();
+    const starPos = [];
+    for (let i = 0; i < 420; i++) {
+      const a = rnd() * Math.PI * 2, e = 0.25 + rnd() * 1.1, r = 1500;
+      starPos.push(Math.cos(a) * Math.cos(e) * r, Math.sin(e) * r, Math.sin(a) * Math.cos(e) * r);
+    }
+    starGeo.setAttribute('position', new THREE.Float32BufferAttribute(starPos, 3));
+    stars = new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 2.4, sizeAttenuation: false, fog: false }));
+    g.add(stars);
+  }
+
+  // Storm extras: rain streaks (thin lines falling).
+  let rain = null;
+  if (storm) {
+    const rainGeo = new THREE.BufferGeometry();
+    const rainPos = [];
+    for (let i = 0; i < 90; i++) {
+      const x = -160 + rnd() * 320, y = 20 + rnd() * 130, z = 160 - rnd() * 420;
+      rainPos.push(x, y, z, x, y - 9, z);
+    }
+    rainGeo.setAttribute('position', new THREE.Float32BufferAttribute(rainPos, 3));
+    rain = new THREE.LineSegments(rainGeo, new THREE.LineBasicMaterial({ color: 0xb8c4cc, transparent: true, opacity: 0.5 }));
+    g.add(rain);
+  }
+
+  return { group: g, fog, beam, beamCone, clouds, birds, rain, stars, lighthousePos: new THREE.Vector3(58, 34, -150) };
+}
+
+export function updateWorld(world, dt, t) {
+  world.clouds.children.forEach((c, i) => {
+    c.position.x += dt * (1.2 + (i % 3) * 0.5);
+    if (c.position.x > 520) c.position.x = -520;
+  });
+  world.birds.children.forEach((b, i) => {
+    b.position.x += dt * (2 + i * 0.3);
+    if (b.position.x > 260) b.position.x = -260;
+  });
+  if (world.beam) {
+    const a = t * 0.45;
+    world.beam.target.position.set(58 + Math.cos(a) * 320, 18, -150 - Math.sin(a) * 320);
+    if (world.beamCone) {
+      world.beamCone.rotation.z = a;
+      world.beamCone.rotation.x = Math.PI / 2 - 0.06;
+    }
+  }
+  if (world.rain) {
+    world.rain.position.y -= dt * 55;
+    if (world.rain.position.y < -120) world.rain.position.y = 0;
+  }
 }

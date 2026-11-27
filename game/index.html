@@ -1,21 +1,68 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Karst Bay Courier</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #1a0f2e; }
-  #game, #hud { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
-  #hud { pointer-events: none; }
-  /* Read aloud, never shown: the status line screen readers announce. */
-  #status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1280px; height: 720px; overflow: hidden; background: #0a1226; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+  #game { position: absolute; inset: 0; width: 1280px; height: 720px; display: block; }
+  #hud { position: absolute; inset: 0; pointer-events: none; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,0.8); }
+  .hud-top { position: absolute; top: 0; left: 0; right: 0; height: 64px; display: flex; justify-content: space-between; align-items: flex-start; padding: 12px 18px 0; }
+  .hud-mission { font-size: 17px; font-weight: 800; letter-spacing: 1px; background: rgba(6,12,20,0.55); padding: 7px 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.25); }
+  .hud-compass { background: rgba(6,12,20,0.35); border-radius: 6px; padding: 2px; }
+  .hud-right { text-align: right; font-weight: 800; }
+  .hud-score { font-size: 20px; }
+  .hud-rings { font-size: 20px; color: #ffd21f; }
+  .hud-timer { font-size: 16px; color: #cfe8ff; }
+  .hud-pay { font-size: 15px; color: #7dffb0; }
+  .hud-left { position: absolute; left: 18px; top: 150px; text-align: left; }
+  .hud-rightcol { position: absolute; right: 18px; top: 150px; text-align: right; }
+  .hud-label { font-size: 13px; font-weight: 700; letter-spacing: 2px; color: #cfe8ff; }
+  .hud-big { font-size: 52px; font-weight: 800; line-height: 1; }
+  .hud-med { font-size: 30px; font-weight: 800; line-height: 1.05; }
+  .hud-unit { font-size: 13px; font-weight: 700; color: #cfe8ff; margin-top: 2px; }
+  .hud-ring { font-size: 19px; font-weight: 800; color: #ffd21f; max-width: 300px; }
+  .hud-bars { position: absolute; left: 18px; bottom: 64px; width: 210px; }
+  .hud-bar-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+  .hud-bar-label { font-size: 12px; font-weight: 800; width: 38px; }
+  .hud-bar { flex: 1; height: 12px; background: rgba(0,0,0,0.55); border: 1px solid rgba(255,255,255,0.4); border-radius: 3px; overflow: hidden; }
+  .hud-fill { height: 100%; }
+  .hud-fill.thr { background: #ffd21f; width: 72%; }
+  .hud-fill.fuel { background: #4dd2ff; width: 100%; }
+  .hud-fill.hull { background: #7dffb0; width: 100%; }
+  .hud-horizon { position: absolute; left: 50%; bottom: 66px; transform: translateX(-50%); }
+  .hud-radar { position: absolute; right: 18px; bottom: 64px; }
+  .hud-dialog { position: absolute; left: 50%; bottom: 26px; transform: translateX(-50%); font-size: 16px; font-weight: 700; background: rgba(6,12,20,0.6); padding: 6px 14px; border-radius: 6px; white-space: nowrap; }
+  .hud-hint { position: absolute; left: 50%; bottom: 4px; transform: translateX(-50%); font-size: 11px; color: rgba(255,255,255,0.75); white-space: nowrap; }
+  .hud-gauges { position: absolute; left: 50%; bottom: 108px; transform: translateX(-50%); display: none; gap: 14px; }
+  .hud-gauge { text-align: center; }
+  .hud-gauge-label { font-size: 10px; font-weight: 800; letter-spacing: 1px; margin-top: 2px; }
+
+  .screen { position: absolute; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center; background: rgba(4,8,18,0.45); pointer-events: auto; text-align: center; }
+  .screen-kicker { font-size: 15px; font-weight: 800; letter-spacing: 5px; color: #ffd21f; }
+  .screen-title-big { font-size: 74px; font-weight: 900; letter-spacing: 3px; margin: 10px 0 6px; }
+  .screen-sub { font-size: 20px; color: #e8f2ff; }
+  .screen-press { margin-top: 26px; font-size: 17px; font-weight: 700; color: #ffd21f; animation: blink 1.6s infinite; }
+  @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+  .screen-menu-title { font-size: 34px; font-weight: 900; letter-spacing: 2px; margin-bottom: 22px; }
+  .screen-cards { display: flex; gap: 22px; }
+  .screen-card { width: 290px; background: rgba(6,14,26,0.82); border: 2px solid rgba(255,210,31,0.65); border-radius: 12px; padding: 20px 18px; text-align: left; pointer-events: auto; cursor: pointer; }
+  .card-name { font-size: 26px; font-weight: 900; }
+  .card-rings { font-size: 17px; font-weight: 800; color: #ffd21f; margin-top: 4px; }
+  .card-weather { font-size: 15px; font-weight: 800; color: #7dd8ff; margin-top: 2px; }
+  .card-desc { font-size: 14px; line-height: 1.45; color: #dfeaff; margin-top: 10px; min-height: 60px; }
+  .card-pay { font-size: 22px; font-weight: 900; color: #7dffb0; margin-top: 8px; }
+  .card-start { margin-top: 12px; width: 100%; padding: 10px; font-size: 17px; font-weight: 900; background: #ffd21f; color: #1a1400; border: none; border-radius: 8px; cursor: pointer; }
+  .screen-end-title { font-size: 52px; font-weight: 900; letter-spacing: 2px; }
+  .screen-end-reason { font-size: 19px; margin-top: 8px; color: #e8f2ff; }
+  .screen-end-stats { font-size: 20px; font-weight: 800; margin-top: 18px; background: rgba(6,12,20,0.65); padding: 12px 20px; border-radius: 8px; }
 </style>
 </head>
 <body>
-<canvas id="game" aria-label="Karst Bay Courier: fly the bush plane through the rings, drop supplies at the lighthouse and land on the island strips"></canvas>
-<canvas id="hud"></canvas>
-<p id="status" role="status" aria-live="polite"></p>
+<canvas id="game" width="1280" height="720"></canvas>
+<div id="hud"></div>
 <script src="./vendor/three.min.js"></script>
 <script type="module" src="./js/main.js"></script>
 </body>

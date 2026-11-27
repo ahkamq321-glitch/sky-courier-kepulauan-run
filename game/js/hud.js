@@ -1,414 +1,281 @@
-// The 2D HUD overlay: tapes, compass, bars, artificial horizon, minimap, the
-// cockpit's six analog gauges, and the title / menu / complete / crash panels.
-// Drawn on a 2D canvas layered over the WebGL canvas, in 1280x720 logical space,
-// with big readable numbers and nothing ever covering the centre of the screen.
-import { FIELD, FONT, MISSIONS, PALETTE, LAYOUT } from './config.js';
-import { SCREEN_COMPLETE, SCREEN_MENU, SCREEN_OVER, SCREEN_PAUSED, SCREEN_PLAY, SCREEN_TITLE } from './screens.js';
+// Dense 2D HUD overlay: compass tape, big SPD/ALT/VSI, bars, radar, rings/timer/score/pay,
+// tower dialog, 6 analog gauges, plus title / mission-select / complete / crash screens.
+import { MISSIONS, fmtTime } from './config.js';
 
-function clamp(value, low, high) {
-  return value < low ? low : value > high ? high : value;
+function el(tag, cls, parent, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  if (parent) parent.appendChild(e);
+  return e;
 }
 
-export function createHud(context) {
-  const fonts = new Map();
-  function text(value, x, y, size, color, align, baseline) {
-    if (!fonts.has(size)) fonts.set(size, `bold ${size}px ${FONT}`);
-    context.font = fonts.get(size);
-    context.fillStyle = color;
-    context.textAlign = align || 'left';
-    context.textBaseline = baseline || 'alphabetic';
-    context.fillText(value, x, y);
+export function buildHUD() {
+  const root = document.getElementById('hud');
+  const top = el('div', 'hud-top', root);
+  const missionEl = el('div', 'hud-mission', top);
+  const compassWrap = el('div', 'hud-compass', top);
+  const compass = document.createElement('canvas');
+  compass.width = 360; compass.height = 34;
+  compassWrap.appendChild(compass);
+  const right = el('div', 'hud-right', top);
+  const scoreEl = el('div', 'hud-score', right);
+  const ringsEl = el('div', 'hud-rings', right);
+  const timerEl = el('div', 'hud-timer', right);
+  const payEl = el('div', 'hud-pay', right);
+
+  const left = el('div', 'hud-left', root);
+  const spdLabel = el('div', 'hud-label', left, 'SPD');
+  const spdEl = el('div', 'hud-big', left, '86');
+  const spdUnit = el('div', 'hud-unit', left, 'KT');
+  const vsiLabel = el('div', 'hud-label', left, 'VSI');
+  const vsiEl = el('div', 'hud-med', left, '+120');
+  const vsiUnit = el('div', 'hud-unit', left, 'FT/MIN');
+
+  const rightCol = el('div', 'hud-rightcol', root);
+  const altLabel = el('div', 'hud-label', rightCol, 'ALT');
+  const altEl = el('div', 'hud-big', rightCol, '1840');
+  const altUnit = el('div', 'hud-unit', rightCol, 'FT');
+  const hdgLabel = el('div', 'hud-label', rightCol, 'HDG');
+  const hdgEl = el('div', 'hud-med', rightCol, '270°');
+  const ringLabel = el('div', 'hud-label', rightCol, 'NEXT RING');
+  const ringEl = el('div', 'hud-ring', rightCol, 'RING 3 • 0.4 NM');
+
+  const bars = el('div', 'hud-bars', root);
+  const thrRow = el('div', 'hud-bar-row', bars);
+  el('span', 'hud-bar-label', thrRow, 'THR');
+  const thrBar = el('div', 'hud-bar', thrRow);
+  const thrFill = el('div', 'hud-fill thr', thrBar);
+  const fuelRow = el('div', 'hud-bar-row', bars);
+  el('span', 'hud-bar-label', fuelRow, 'FUEL');
+  const fuelBar = el('div', 'hud-bar', fuelRow);
+  const fuelFill = el('div', 'hud-fill fuel', fuelBar);
+  const hullRow = el('div', 'hud-bar-row', bars);
+  el('span', 'hud-bar-label', hullRow, 'HULL');
+  const hullBar = el('div', 'hud-bar', hullRow);
+  const hullFill = el('div', 'hud-fill hull', hullBar);
+
+  // Artificial horizon + radar (bottom centre / bottom right), tower dialog, hint line.
+  const horizonWrap = el('div', 'hud-horizon', root);
+  const horizon = document.createElement('canvas');
+  horizon.width = 150; horizon.height = 84;
+  horizonWrap.appendChild(horizon);
+  const radarWrap = el('div', 'hud-radar', root);
+  const radar = document.createElement('canvas');
+  radar.width = 118; radar.height = 118;
+  radarWrap.appendChild(radar);
+  const dialogEl = el('div', 'hud-dialog', root);
+  const hintEl = el('div', 'hud-hint', root, 'W/S pitch · A/D roll · Q/E yaw · Shift/Ctrl throttle · Space drop · C camera · R restart');
+
+  // Cockpit gauges: 6 analog dials along the bottom (visible in cockpit view).
+  const gaugesWrap = el('div', 'hud-gauges', root);
+  const gauges = [];
+  const gaugeDefs = [
+    { label: 'AIRSPEED', min: 0, max: 160, unit: 'KT' },
+    { label: 'ATTITUDE', min: -30, max: 30, unit: '°' },
+    { label: 'ALTIMETER', min: 0, max: 4000, unit: 'FT' },
+    { label: 'COMPASS', min: 0, max: 360, unit: '°' },
+    { label: 'VERT SPEED', min: -1000, max: 1000, unit: 'FPM' },
+    { label: 'FUEL', min: 0, max: 100, unit: '%' },
+  ];
+  for (const def of gaugeDefs) {
+    const wrap = el('div', 'hud-gauge', gaugesWrap);
+    const cv = document.createElement('canvas');
+    cv.width = 74; cv.height = 74;
+    wrap.appendChild(cv);
+    el('div', 'hud-gauge-label', wrap, def.label);
+    gauges.push({ ...def, cv });
   }
 
-  function panel(x, y, w, h) {
-    context.fillStyle = PALETTE.hudPanel;
-    context.beginPath();
-    context.roundRect(x, y, w, h, 8);
-    context.fill();
+  // Full screens: title, mission menu, complete, crashed.
+  const titleScr = el('div', 'screen screen-title', root);
+  el('div', 'screen-kicker', titleScr, 'KARST BAY · COURIER SERVICE');
+  el('h1', 'screen-title-big', titleScr, 'KARST BAY COURIER');
+  el('div', 'screen-sub', titleScr, 'Mail, storm and night runs between the karst towers.');
+  el('div', 'screen-press', titleScr, 'Press Enter to fly');
+  const menuScr = el('div', 'screen screen-menu', root);
+  el('h2', 'screen-menu-title', menuScr, 'CHOOSE A CONTRACT');
+  const cards = el('div', 'screen-cards', menuScr);
+  const cardEls = [];
+  for (const m of MISSIONS) {
+    const card = el('div', 'screen-card', cards);
+    el('div', 'card-name', card, m.name);
+    el('div', 'card-rings', card, m.rings + ' RINGS');
+    el('div', 'card-weather', card, m.weather);
+    el('div', 'card-desc', card, m.desc);
+    el('div', 'card-pay', card, 'CR ' + m.pay);
+    el('button', 'card-start', card, 'START');
+    cardEls.push(card);
   }
+  const endScr = el('div', 'screen screen-end', root);
+  const endTitle = el('h2', 'screen-end-title', endScr);
+  const endReason = el('div', 'screen-end-reason', endScr);
+  const endStats = el('div', 'screen-end-stats', endScr);
+  el('div', 'screen-press', endScr, 'Press R to fly again');
 
-  function bar(x, y, w, h, fraction, color, label) {
-    text(label, x, y - 4, 12, PALETTE.hudText, 'left');
-    context.fillStyle = 'rgba(0, 0, 0, 0.5)';
-    context.fillRect(x, y, w, h);
-    context.fillStyle = color;
-    context.fillRect(x, y, Math.max(0, w * clamp(fraction, 0, 1)), h);
-  }
+  return {
+    root, missionEl, compass, scoreEl, ringsEl, timerEl, payEl,
+    spdEl, vsiEl, altEl, hdgEl, ringEl, thrFill, fuelFill, hullFill,
+    horizon, radar, dialogEl, gauges, titleScr, menuScr, endScr,
+    endTitle, endReason, endStats, cardEls,
+  };
+}
 
-  function tape(x, y, w, h, value, step, unit, label) {
-    panel(x - 6, y - 6, w + 12, h + 12);
-    const centre = y + h / 2;
-    const pxPerStep = 26;
-    const base = Math.round(value / step) * step;
-    context.save();
-    context.beginPath();
-    context.rect(x, y, w, h);
-    context.clip();
-    context.strokeStyle = 'rgba(255, 247, 230, 0.5)';
-    context.fillStyle = PALETTE.hudText;
-    context.lineWidth = 1;
-    for (let offset = -3; offset <= 3; offset += 1) {
-      const v = base + offset * step;
-      const ty = centre - (value - v) / step * pxPerStep;
-      context.beginPath();
-      context.moveTo(x + w - 12, ty);
-      context.lineTo(x + w, ty);
-      context.stroke();
-      if (offset % 2 === 0) text(String(v), x + 4, ty + 4, 12, PALETTE.hudText, 'left', 'middle');
-    }
-    context.restore();
-    context.fillStyle = PALETTE.hudAccent;
-    context.fillRect(x, centre - 16, w, 32);
-    text(String(Math.round(value)), x + w / 2, centre + 7, 20, '#1a0f2e', 'center', 'middle');
-    text(label + ' ' + unit, x + w / 2, y + h + 18, 13, PALETTE.hudText, 'center');
-  }
-
-  function compass(state) {
-    const headingDeg = ((state.plane.heading * 180 / Math.PI) % 360 + 360) % 360;
-    const w = 420;
-    const x = (FIELD.width - w) / 2;
-    const y = 14;
-    panel(x - 8, y - 4, w + 16, 34);
-    const marks = [[0, 'N'], [45, 'NE'], [90, 'E'], [135, 'SE'], [180, 'S'], [225, 'SW'], [270, 'W'], [315, 'NW']];
-    context.save();
-    context.beginPath();
-    context.rect(x, y, w, 26);
-    context.clip();
-    for (const [deg, label] of marks) {
-      let diff = deg - headingDeg;
-      while (diff > 180) diff -= 360;
-      while (diff < -180) diff += 360;
-      const mx = x + w / 2 + diff * 2.4;
-      if (mx < x - 20 || mx > x + w + 20) continue;
-      text(label, mx, y + 19, 14, PALETTE.hudText, 'center', 'middle');
-    }
-    context.restore();
-    context.fillStyle = PALETTE.hudAccent;
-    context.beginPath();
-    context.moveTo(x + w / 2, y + 26);
-    context.lineTo(x + w / 2 - 6, y + 33);
-    context.lineTo(x + w / 2 + 6, y + 33);
-    context.closePath();
-    context.fill();
-  }
-
-  function horizon(state) {
-    const cx = FIELD.width / 2;
-    const cy = FIELD.height - 78;
-    const r = 52;
-    context.save();
-    context.beginPath();
-    context.arc(cx, cy, r, 0, Math.PI * 2);
-    context.clip();
-    context.translate(cx, cy);
-    context.rotate(-state.plane.roll);
-    const horizonY = state.plane.pitch * 60;
-    context.fillStyle = '#3d7ec2';
-    context.fillRect(-r, -r, r * 2, r + horizonY);
-    context.fillStyle = '#8b5a2b';
-    context.fillRect(-r, horizonY, r * 2, r - horizonY);
-    context.strokeStyle = PALETTE.hudText;
-    context.lineWidth = 2;
-    context.beginPath();
-    context.moveTo(-r, horizonY);
-    context.lineTo(r, horizonY);
-    context.stroke();
-    context.restore();
-    context.strokeStyle = PALETTE.hudText;
-    context.lineWidth = 2;
-    context.beginPath();
-    context.arc(cx, cy, r, 0, Math.PI * 2);
-    context.stroke();
-    context.fillStyle = PALETTE.hudAccent;
-    context.beginPath();
-    context.moveTo(cx - 16, cy);
-    context.lineTo(cx - 4, cy);
-    context.lineTo(cx, cy - 5);
-    context.lineTo(cx + 4, cy);
-    context.lineTo(cx + 16, cy);
-    context.lineTo(cx + 16, cy + 4);
-    context.lineTo(cx - 16, cy + 4);
-    context.closePath();
-    context.fill();
-  }
-
-  function minimap(state, missions) {
-    const w = 190;
-    const h = 118;
-    const x = FIELD.width - w - 18;
-    const y = FIELD.height - h - 18;
-    panel(x - 6, y - 6, w + 12, h + 12);
-    const zMax = 1600;
-    function mx(wx) { return x + (wx + 600) / 1200 * w; }
-    function mz(wz) { return y + h - (wz + 1100) / 1600 * h; }
-    context.fillStyle = PALETTE.seaMid;
-    context.fillRect(x, y, w, h);
-    context.fillStyle = PALETTE.sand;
-    for (const isl of [...LAYOUT.islands, LAYOUT.lighthouseIsland]) {
-      context.beginPath();
-      context.arc(mx(isl.x), mz(isl.z), Math.max(2, isl.r * 0.1), 0, Math.PI * 2);
-      context.fill();
-    }
-    context.fillStyle = PALETTE.runway;
-    for (const s of [...LAYOUT.hopStrips, LAYOUT.strip]) {
-      context.fillRect(mx(s.x) - 3, mz(s.z + s.length / 2), 6, Math.max(3, s.length / 1600 * h));
-    }
-    for (const ring of missions.rings) {
-      context.fillStyle = ring.cleared ? '#7ee081' : PALETTE.ring;
-      context.beginPath();
-      context.arc(mx(ring.x), mz(ring.z), ring.cleared ? 3 : 4.5, 0, Math.PI * 2);
-      context.fill();
-    }
-    context.fillStyle = PALETTE.lightRed;
-    context.beginPath();
-    context.arc(mx(LAYOUT.lighthouse.x), mz(LAYOUT.lighthouse.z), 4, 0, Math.PI * 2);
-    context.fill();
-    const p = state.plane;
-    context.save();
-    context.translate(mx(p.x), mz(p.z));
-    context.rotate(-p.heading);
-    context.fillStyle = PALETTE.hudText;
-    context.beginPath();
-    context.moveTo(0, -7);
-    context.lineTo(5, 6);
-    context.lineTo(-5, 6);
-    context.closePath();
-    context.fill();
-    context.restore();
-  }
-
-  function drawHud(state, missions, best, time) {
-    const p = state.plane;
-    const speedKt = Math.round(p.speed * 1.9);
-    const altFt = Math.round(p.y * 12);
-    tape(18, 120, 64, 300, speedKt, 10, 'KT', 'SPD');
-    tape(FIELD.width - 82, 120, 64, 300, altFt, 100, 'FT', 'ALT');
-    compass(state);
-    panel(18, FIELD.height - 118, 168, 104);
-    bar(24, FIELD.height - 96, 150, 12, p.throttle, PALETTE.hudAccent, 'THR');
-    bar(24, FIELD.height - 62, 150, 12, p.fuel / 100, p.fuel < 20 ? PALETTE.hudDanger : '#7ee081', 'FUEL');
-    bar(24, FIELD.height - 28, 150, 12, 1 - p.damage / 100, p.damage > 60 ? PALETTE.hudDanger : '#7ee081', 'HULL');
-    horizon(state);
-    minimap(state, missions);
-    const mins = Math.floor(state.elapsed / 60);
-    const secs = Math.floor(state.elapsed % 60);
-    const clock = mins + ':' + String(secs).padStart(2, '0');
-    text(state.mission.name, 24, 30, 22, PALETTE.hudText, 'left');
-    let objective = '';
-    if (state.mission.id === 'rings') {
-      const next = missions.nextRing(state);
-      objective = next ? 'Ring ' + (state.ringsCleared + 1) + ' of 8  ·  ' + Math.round(next.dist) + ' m' : 'All rings clear';
-    } else if (state.mission.id === 'drop') {
-      objective = state.crateDropped ? 'Crate away — watch the pad' : 'Drop the crate on the lighthouse pad';
-    } else if (state.mission.id === 'hop') {
-      objective = 'Strips landed ' + state.stripsLanded + ' of 3';
-    } else {
-      objective = 'Land on the Coastal Strip';
-    }
-    text(objective + '   ·   T+ ' + clock, 24, 56, 15, PALETTE.muted, 'left');
-    text('SCORE ' + state.score, FIELD.width - 24, 30, 22, PALETTE.hudText, 'right');
-    text('RINGS ' + state.ringsCleared + '/8', FIELD.width - 24, 56, 15, PALETTE.muted, 'right');
-    if (state.messageTimer > 0 && state.message) {
-      const alpha = clamp(state.messageTimer, 0, 1);
-      context.globalAlpha = alpha;
-      text(state.message, FIELD.width / 2, 84, 24, PALETTE.hudAccent, 'center');
-      context.globalAlpha = 1;
-    }
-    if (p.speed < 26 && !p.grounded) text('STALL', FIELD.width / 2, 116, 22, PALETTE.hudDanger, 'center');
-    if (p.fuel < 20) text('LOW FUEL', FIELD.width / 2, 140, 18, PALETTE.hudDanger, 'center');
-    if (p.fuel <= 0) text('ENGINE OUT', FIELD.width / 2, 164, 18, PALETTE.hudDanger, 'center');
-    text('W/S pitch · A/D roll · Q/E yaw · Shift/Ctrl throttle · Space drop · C camera · R restart', FIELD.width / 2, FIELD.height - 10, 13, PALETTE.muted, 'center');
-  }
-
-  // The cockpit: a dark panel across the bottom with six round gauges, warning
-  // lights, and windshield pillars framing the 3D world ahead.
-  function gauge(cx, cy, r, label, value, min, max, format) {
-    context.fillStyle = '#14101f';
-    context.beginPath();
-    context.arc(cx, cy, r, 0, Math.PI * 2);
-    context.fill();
-    context.strokeStyle = PALETTE.hudText;
-    context.lineWidth = 2;
-    context.beginPath();
-    context.arc(cx, cy, r, 0, Math.PI * 2);
-    context.stroke();
-    context.fillStyle = PALETTE.hudText;
-    context.beginPath();
-    context.arc(cx, cy, 3, 0, Math.PI * 2);
-    context.fill();
-    const angle = -Math.PI * 0.75 + (clamp(value, min, max) - min) / (max - min) * Math.PI * 1.5;
-    context.strokeStyle = PALETTE.hudAccent;
-    context.lineWidth = 3;
-    context.beginPath();
-    context.moveTo(cx, cy);
-    context.lineTo(cx + Math.cos(angle) * (r - 8), cy + Math.sin(angle) * (r - 8));
-    context.stroke();
-    text(label, cx, cy + r + 16, 12, PALETTE.muted, 'center');
-    text(format(value), cx, cy - r - 8, 13, PALETTE.hudText, 'center');
-  }
-
-  function attitudeGauge(cx, cy, r, state) {
-    context.save();
-    context.beginPath();
-    context.arc(cx, cy, r, 0, Math.PI * 2);
-    context.clip();
-    context.translate(cx, cy);
-    context.rotate(-state.plane.roll);
-    const horizonY = state.plane.pitch * r * 0.5;
-    context.fillStyle = '#3d7ec2';
-    context.fillRect(-r, -r, r * 2, r + horizonY);
-    context.fillStyle = '#8b5a2b';
-    context.fillRect(-r, horizonY, r * 2, r - horizonY);
-    context.strokeStyle = PALETTE.hudText;
-    context.lineWidth = 2;
-    context.beginPath();
-    context.moveTo(-r, horizonY);
-    context.lineTo(r, horizonY);
-    context.stroke();
-    context.restore();
-    context.strokeStyle = PALETTE.hudText;
-    context.lineWidth = 2;
-    context.beginPath();
-    context.arc(cx, cy, r, 0, Math.PI * 2);
-    context.stroke();
-    context.fillStyle = PALETTE.hudAccent;
-    context.beginPath();
-    context.moveTo(cx - 14, cy);
-    context.lineTo(cx + 14, cy);
-    context.lineTo(cx + 14, cy + 4);
-    context.lineTo(cx - 14, cy + 4);
-    context.closePath();
-    context.fill();
-    text('ATT', cx, cy + r + 16, 12, PALETTE.muted, 'center');
-  }
-
-  function drawCockpit(state, time) {
-    const p = state.plane;
-    const panelTop = FIELD.height - 208;
-    context.fillStyle = '#14101f';
-    context.fillRect(0, panelTop, FIELD.width, 208);
-    context.fillStyle = PALETTE.panelLine;
-    context.fillRect(0, panelTop, FIELD.width, 3);
-    const gy = panelTop + 78;
-    gauge(150, gy, 44, 'AIRSPEED', p.speed * 1.9, 0, 180, (v) => Math.round(v) + ' KT');
-    attitudeGauge(340, gy, 44, state);
-    gauge(530, gy, 44, 'ALTITUDE', p.y * 12, 0, 1200, (v) => Math.round(v) + ' FT');
-    gauge(720, gy, 44, 'COMPASS', ((p.heading * 180 / Math.PI) % 360 + 360) % 360, 0, 360, (v) => Math.round(v) + '°');
-    gauge(900, gy, 44, 'VERT SPEED', p.vy * 12, -60, 60, (v) => (v >= 0 ? '+' : '') + Math.round(v) + ' FPM');
-    gauge(1080, gy, 44, 'FUEL', p.fuel, 0, 100, (v) => Math.round(v) + '%');
-    const warnings = [];
-    if (p.speed < 26 && !p.grounded) warnings.push(['STALL', PALETTE.hudDanger]);
-    if (p.fuel < 20) warnings.push(['LOW FUEL', PALETTE.hudDanger]);
-    if (p.fuel <= 0) warnings.push(['ENGINE', PALETTE.hudDanger]);
-    if (p.damage > 60) warnings.push(['HULL', PALETTE.hudDanger]);
-    warnings.forEach((warn, i) => {
-      const on = Math.floor(time * 3) % 2 === 0;
-      context.fillStyle = on ? warn[1] : '#5a2020';
-      context.beginPath();
-      context.arc(1200, panelTop + 26 + i * 26, 8, 0, Math.PI * 2);
-      context.fill();
-      text(warn[0], 1216, panelTop + 30 + i * 26, 12, PALETTE.hudText, 'left');
-    });
-    // Windshield pillars (the 3D cockpit frame is also in the scene).
-    context.fillStyle = '#14101f';
-    context.beginPath();
-    context.moveTo(0, 0);
-    context.lineTo(90, 0);
-    context.lineTo(150, panelTop);
-    context.lineTo(0, panelTop);
-    context.closePath();
-    context.fill();
-    context.beginPath();
-    context.moveTo(FIELD.width, 0);
-    context.lineTo(FIELD.width - 90, 0);
-    context.lineTo(FIELD.width - 150, panelTop);
-    context.lineTo(FIELD.width, panelTop);
-    context.closePath();
-    context.fill();
-    // No centre pillar here — the 3D cockpit frame carries the pillars.
-  }
-
-  function drawCockpitHud(state) {
-    const p = state.plane;
-    text(state.mission.name, 170, 30, 22, PALETTE.hudText, 'left');
-    text('SCORE ' + state.score, FIELD.width - 170, 30, 22, PALETTE.hudText, 'right');
-    if (state.messageTimer > 0 && state.message) {
-      const alpha = clamp(state.messageTimer, 0, 1);
-      context.globalAlpha = alpha;
-      text(state.message, FIELD.width / 2, 84, 24, PALETTE.hudAccent, 'center');
-      context.globalAlpha = 1;
+function drawCompass(cv, heading) {
+  const x = cv.getContext('2d');
+  const W = cv.width, H = cv.height;
+  x.clearRect(0, 0, W, H);
+  x.fillStyle = 'rgba(6,12,20,0.55)';
+  x.fillRect(0, 0, W, H);
+  x.strokeStyle = 'rgba(255,255,255,0.9)';
+  x.fillStyle = '#fff';
+  x.font = 'bold 13px system-ui, sans-serif';
+  x.textAlign = 'center';
+  const pxPerDeg = 3.2;
+  const centre = W / 2;
+  for (let d = -60; d <= 60; d += 5) {
+    let h = Math.round(heading + d);
+    h = ((h % 360) + 360) % 360;
+    const px = centre + d * pxPerDeg;
+    const major = h % 30 === 0;
+    x.beginPath();
+    x.moveTo(px, major ? 4 : 10);
+    x.lineTo(px, major ? 20 : 16);
+    x.stroke();
+    if (major && Math.abs(d) > 10) {
+      const label = h === 0 ? 'N' : h === 90 ? 'E' : h === 180 ? 'S' : h === 270 ? 'W' : String(h).padStart(3, '0');
+      x.fillText(label, px, 31);
     }
   }
+  x.fillStyle = '#ffd21f';
+  x.beginPath();
+  x.moveTo(centre - 6, 0); x.lineTo(centre + 6, 0); x.lineTo(centre, 8); x.closePath();
+  x.fill();
+  x.font = 'bold 13px system-ui, sans-serif';
+  x.fillText(String(Math.round(heading)).padStart(3, '0') + '°', centre, H - 2);
+}
 
-  function drawPanel(title, lines, prompt, width, lineSize) {
-    const w = width || 640;
-    const size = lineSize || 20;
-    const lineH = 34;
-    const height = 150 + lines.length * lineH + 70;
-    const x = (FIELD.width - w) / 2;
-    const y = (FIELD.height - height) / 2;
-    context.fillStyle = 'rgba(20, 12, 40, 0.88)';
-    context.beginPath();
-    context.roundRect(x, y, w, height, 12);
-    context.fill();
-    context.strokeStyle = PALETTE.panelLine;
-    context.lineWidth = 2;
-    context.stroke();
-    text(title, FIELD.width / 2, y + 72, 46, PALETTE.hudText, 'center');
-    for (let index = 0; index < lines.length; index += 1) {
-      text(lines[index], FIELD.width / 2, y + 128 + index * lineH, size, PALETTE.muted, 'center');
-    }
-    text(prompt, FIELD.width / 2, y + height - 36, 22, PALETTE.hudAccent, 'center');
+function drawHorizon(cv, roll, pitch) {
+  const x = cv.getContext('2d');
+  const W = cv.width, H = cv.height;
+  x.clearRect(0, 0, W, H);
+  x.save();
+  x.beginPath();
+  x.arc(W / 2, H / 2, Math.min(W, H) / 2 - 2, 0, Math.PI * 2);
+  x.clip();
+  x.translate(W / 2, H / 2);
+  x.rotate(roll);
+  x.translate(0, pitch * 0.9);
+  x.fillStyle = '#3a7ac8';
+  x.fillRect(-W, -H, W * 2, H);
+  x.fillStyle = '#8a5a34';
+  x.fillRect(-W, 0, W * 2, H);
+  x.strokeStyle = '#fff';
+  x.lineWidth = 2;
+  x.beginPath(); x.moveTo(-W, 0); x.lineTo(W, 0); x.stroke();
+  x.restore();
+  x.strokeStyle = '#ffd21f';
+  x.lineWidth = 2;
+  x.beginPath();
+  x.moveTo(W / 2 - 16, H / 2); x.lineTo(W / 2 - 4, H / 2);
+  x.moveTo(W / 2 + 4, H / 2); x.lineTo(W / 2 + 16, H / 2);
+  x.stroke();
+  x.strokeStyle = 'rgba(255,255,255,0.85)';
+  x.beginPath();
+  x.arc(W / 2, H / 2, Math.min(W, H) / 2 - 2, 0, Math.PI * 2);
+  x.stroke();
+}
+
+function drawRadar(cv, planePos, heading, rings, ringIndex, lighthouse) {
+  const x = cv.getContext('2d');
+  const W = cv.width, H = cv.height, cx = W / 2, cy = H / 2, R = W / 2 - 4;
+  x.clearRect(0, 0, W, H);
+  x.fillStyle = 'rgba(6,18,12,0.6)';
+  x.beginPath(); x.arc(cx, cy, R, 0, Math.PI * 2); x.fill();
+  x.strokeStyle = 'rgba(120,255,170,0.7)';
+  x.beginPath(); x.arc(cx, cy, R, 0, Math.PI * 2); x.stroke();
+  x.beginPath(); x.arc(cx, cy, R / 2, 0, Math.PI * 2); x.stroke();
+  x.beginPath(); x.moveTo(cx - R, cy); x.lineTo(cx + R, cy); x.stroke();
+  x.beginPath(); x.moveTo(cx, cy - R); x.lineTo(cx, cy + R); x.stroke();
+  const scale = R / 320;
+  const plot = (wx, wz, color, r) => {
+    const dx = (wx - planePos.x) * scale, dz = (wz - planePos.z) * scale;
+    const h = (heading * Math.PI) / 180;
+    const rx = dx * Math.cos(h) - dz * Math.sin(h);
+    const rz = dx * Math.sin(h) + dz * Math.cos(h);
+    x.fillStyle = color;
+    x.beginPath(); x.arc(cx + rx, cy + rz, r, 0, Math.PI * 2); x.fill();
+  };
+  for (let i = ringIndex; i < Math.min(rings.length, ringIndex + 4); i++) {
+    plot(rings[i].x, rings[i].z, i === ringIndex ? '#ffd21f' : 'rgba(255,210,31,0.45)', i === ringIndex ? 4 : 3);
   }
+  plot(lighthouse.x, lighthouse.z, '#ff5a5a', 4);
+  x.fillStyle = '#fff';
+  x.beginPath();
+  x.moveTo(cx, cy - 6); x.lineTo(cx - 4, cy + 5); x.lineTo(cx + 4, cy + 5); x.closePath();
+  x.fill();
+}
 
-  // Paint the HUD and the screen panels over the 3D world the renderer drew.
-  function draw(state, screen, missions, best, time, selectedMission) {
-    if (screen === SCREEN_PLAY) {
-      if (state.camera === 'cockpit') {
-        drawCockpit(state, time);
-        drawCockpitHud(state);
-      } else {
-        drawHud(state, missions, best, time);
-      }
-      return;
-    }
-    if (screen === SCREEN_PAUSED) {
-      drawHud(state, missions, best, time);
-      drawPanel('PAUSED', ['The bay will wait for you.'], 'Press P to resume');
-      return;
-    }
-    if (screen === SCREEN_TITLE) {
-      text('KARST BAY COURIER', FIELD.width / 2, 150, 64, PALETTE.hudText, 'center');
-      text('A bush-plane courier run over a karst bay at golden hour', FIELD.width / 2, 196, 22, PALETTE.hudAccent, 'center');
-      text('Press Enter to choose a mission', FIELD.width / 2, 620, 24, PALETTE.hudText, 'center');
-      if (best > 0) text('Best score ' + best, FIELD.width / 2, 656, 18, PALETTE.muted, 'center');
-      return;
-    }
-    if (screen === SCREEN_MENU) {
-      const lines = MISSIONS.map((mission, index) => {
-        const mark = index === selectedMission ? '▶ ' : '   ';
-        return mark + mission.name + ' — ' + mission.blurb;
-      });
-      drawPanel('CHOOSE A MISSION', lines, 'Up / Down to choose · Enter to fly', 780, 18);
-      return;
-    }
-    if (screen === SCREEN_COMPLETE) {
-      drawPanel('MISSION COMPLETE — ' + state.rank, [
-        'Score ' + state.score,
-        'Rings ' + state.ringsCleared + ' of 8 · Strips ' + state.stripsLanded + ' of 3',
-        'Fuel left ' + Math.round(state.plane.fuel) + '% · Damage ' + Math.round(state.plane.damage) + '%',
-        '',
-      ], 'Enter for the menu · R to fly again');
-      return;
-    }
-    if (screen === SCREEN_OVER) {
-      drawPanel('CRASHED', [
-        state.message || 'The courier went down.',
-        'Score ' + state.score + ' · Rings ' + state.ringsCleared + ' of 8',
-        '',
-      ], 'Press R to try again');
-    }
+function drawGauge(g, value) {
+  const x = g.cv.getContext('2d');
+  const W = g.cv.width, H = g.cv.height, cx = W / 2, cy = H / 2 + 4, R = 30;
+  x.clearRect(0, 0, W, H);
+  x.fillStyle = 'rgba(8,12,18,0.72)';
+  x.beginPath(); x.arc(cx, cy, R + 3, 0, Math.PI * 2); x.fill();
+  x.strokeStyle = '#e8e8e8';
+  x.lineWidth = 2;
+  x.beginPath(); x.arc(cx, cy, R, 0, Math.PI * 2); x.stroke();
+  const frac = Math.max(0, Math.min(1, (value - g.min) / (g.max - g.min)));
+  const ang = -Math.PI * 0.75 + frac * Math.PI * 1.5;
+  x.strokeStyle = '#ffd21f';
+  x.lineWidth = 2.5;
+  x.beginPath();
+  x.moveTo(cx, cy);
+  x.lineTo(cx + Math.cos(ang) * (R - 5), cy + Math.sin(ang) * (R - 5));
+  x.stroke();
+  x.fillStyle = '#fff';
+  x.font = 'bold 11px system-ui, sans-serif';
+  x.textAlign = 'center';
+  const shown = g.label === 'COMPASS' ? Math.round(value) + '°' : Math.round(value);
+  x.fillText(String(shown), cx, cy + R - 8);
+}
+
+export function updateHUD(h, s) {
+  h.missionEl.textContent = s.mission.name.toUpperCase() + ' · ' + s.mission.weather;
+  h.scoreEl.textContent = 'SCORE ' + s.score;
+  h.ringsEl.textContent = 'RINGS ' + s.ringsHit + '/' + s.mission.rings;
+  h.timerEl.textContent = fmtTime(s.timer);
+  h.payEl.textContent = 'CR ' + s.mission.pay;
+  h.spdEl.textContent = String(Math.round(s.spd));
+  h.vsiEl.textContent = (s.vsi >= 0 ? '+' : '') + String(Math.round(s.vsi));
+  h.altEl.textContent = String(Math.round(s.alt));
+  h.hdgEl.textContent = String(Math.round(s.heading)).padStart(3, '0') + '°';
+  const cmd = s.command || 'STRAIGHT AHEAD';
+  h.ringEl.textContent = 'RING ' + (s.ringIndex + 1) + ' • ' + s.ringDist + ' NM • ' + cmd;
+  h.thrFill.style.width = Math.round(s.throttle * 100) + '%';
+  h.fuelFill.style.width = Math.round(s.fuel) + '%';
+  h.hullFill.style.width = Math.round(s.hull) + '%';
+  h.dialogEl.textContent = s.dialog || '';
+  drawCompass(h.compass, s.heading);
+  drawHorizon(h.horizon, s.roll, s.pitch);
+  drawRadar(h.radar, s.planePos, s.heading, s.rings, s.ringIndex, s.lighthouse);
+  const vals = [s.spd, s.pitchDeg, s.alt, s.heading, s.vsi, s.fuel];
+  h.gauges.forEach((g, i) => drawGauge(g, vals[i]));
+  h.root.querySelector('.hud-gauges').style.display = s.cockpit ? 'flex' : 'none';
+  h.horizon.parentElement.style.display = s.cockpit ? 'none' : 'block';
+}
+
+export function showScreen(h, name, data) {
+  const show = (e, on) => { e.style.display = on ? 'flex' : 'none'; };
+  show(h.titleScr, name === 'title');
+  show(h.menuScr, name === 'menu');
+  show(h.endScr, name === 'complete' || name === 'crashed');
+  if (name === 'complete' || name === 'crashed') {
+    h.endTitle.textContent = data.title;
+    h.endReason.textContent = data.reason || '';
+    h.endStats.textContent = 'RANK ' + data.rank + '  ·  SCORE ' + data.score + '  ·  RINGS ' + data.ringsHit + '/' + data.ringsTotal + '  ·  TIME ' + fmtTime(data.timeSec) + '  ·  PAY CR ' + data.pay;
   }
-
-  return { draw };
+  h.root.classList.toggle('in-menu', name === 'menu' || name === 'title');
+  const hideChrome = name === 'menu' || name === 'title';
+  h.root.querySelector('.hud-rightcol').style.display = hideChrome ? 'none' : 'block';
 }

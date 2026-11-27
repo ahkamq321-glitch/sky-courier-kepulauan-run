@@ -1,47 +1,55 @@
 # Karst Bay Courier
 
-[![make.fun](https://make.fun/badge/best-flight-game-20261126-0057.svg)](https://make.fun/bounty/best-flight-game-20261126-0057)
-[![Rank](https://make.fun/badge/best-flight-game-20261126-0057/ahkamq321-glitch/sky-courier-kepulauan-run/rank.svg)](https://make.fun/bounty/best-flight-game-20261126-0057)
-[![Reward](https://make.fun/badge/best-flight-game-20261126-0057/ahkamq321-glitch/sky-courier-kepulauan-run/reward.svg)](https://make.fun/bounty/best-flight-game-20261126-0057)
+[![make.fun](https://make.fun/badge/best-flight-game-20261126-0057.svg?utm_source=github&utm_medium=readme)](https://make.fun/bounty/best-flight-game-20261126-0057)
+[![make.fun](https://make.fun/badge/best-flight-game-20261126-0057/entries.svg?utm_source=github&utm_medium=readme)](https://make.fun/bounty/best-flight-game-20261126-0057)
+[![make.fun](https://make.fun/badge/best-flight-game-20261126-0057/escrow.svg?utm_source=github&utm_medium=readme)](https://make.fun/bounty/best-flight-game-20261126-0057)
 
-A real 3D bush-plane courier game built with Three.js. Fly a Cessna-style
-high-wing plane over a karst bay at golden hour — thread glowing rings between
-limestone towers, drop supplies on the lighthouse pad, hop between island
-strips, and land on the coastal strip in a crosswind.
+A real-3D courier flight game built with Three.js. Fly the bush plane PK-SKY through
+glowing rings between karst towers, past the lighthouse, and deliver the mail — at dusk,
+in a storm, or under the night beam.
 
 ## How to play
 
-Open `game/index.html` in a desktop browser (no network needed — Three.js is
-vendored under `game/vendor/`). Press Enter, pick a mission, and fly.
+Open `game/index.html` in a browser (or serve the folder) and press Enter. Pick a
+contract, then fly the rings in order. Thread every ring to complete the contract and
+earn the pay. Mind your fuel — and don't hit the water.
 
 ## Controls
 
-- **W / S** — pitch down / up (Arrow Up / Down also work)
-- **A / D** — roll left / right (Arrow Left / Right also work)
-- **Q / E** — yaw
-- **Shift / Ctrl** — throttle up / down
-- **Space** — drop the supply crate (Lighthouse Supply Drop)
-- **C** — toggle chase view / cockpit view
-- **R** — restart the mission
-- **P** — pause
+- W / S — pitch down / up
+- A / D — roll left / right (turns the plane)
+- Q / E — yaw left / right
+- Shift / Ctrl — throttle up / down
+- Space — drop the supply crate
+- C — toggle chase / cockpit camera
+- R — restart the mission
 
 ## Missions
 
-1. **Ring Run** — fly all 8 glowing rings through the karst towers.
-2. **Lighthouse Supply Drop** — drop the crate on the lighthouse island pad.
-3. **Island Hop** — land on 3 island strips.
-4. **Crosswind Landing** — precision landing on the coastal strip.
+| Contract | Rings | Weather | Pay |
+| --- | --- | --- | --- |
+| Mail Run | 12 | DUSK | CR 180 |
+| Storm Courier | 8 | STORM | CR 260 |
+| Night Lighthouse | 10 | NIGHT | CR 320 |
 
-## Tech
+Each contract threads glowing rings between the karst towers, with a guide trail of
+ghost rings showing the next turns, a live tower dialog, and a mission-complete screen
+with score, time and rank.
 
-- Three.js r128 (vendored, offline) — real 3D renderer with shadows, ACES
-  tone mapping and a golden-hour sun.
-- Plain static files: `game/index.html` + ES modules under `game/js/`.
-- `main.ts` hands the game in: it copies `game/` and `screenshots/` to the
-  output directory and writes `dossier.json` with the make.fun library.
-- Run it with `mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts`.
+## Built with Three.js (real 3D)
 
-## Entry
+The world is real 3D: a Cessna-style bush plane built from primitives, a wavy teal sea,
+karst towers with rock strata, a banded lighthouse with a rotating beam, a coastal
+runway, snow-capped mountains, drifting clouds and birds — at golden hour, in a storm,
+or under the stars.
 
-Built for the [make.fun "Make the best flight game" bounty](https://make.fun/bounty/best-flight-game-20261126-0057).
-Payout wallet: `6CArXbxMVYEMW8WWcc1KpacMp7cxsnctoj2fZnAtdsRd`
+## Development
+
+- `game/` — the game (Three.js r128 vendored under `game/vendor/`, no network at runtime)
+- `main.ts` — the hand-in program: copies `game/` + `screenshots/` and writes `dossier.json`
+- `take_shots.py` — renders the 4 screenshots with Camoufox
+
+---
+
+Built for the [make.fun flight game bounty](https://make.fun/bounty/best-flight-game-20261126-0057).
+Referral: `3qxkam06` · Payout wallet: `6CArXbxMVYEMW8WWcc1KpacMp7cxsnctoj2fZnAtdsRd`
