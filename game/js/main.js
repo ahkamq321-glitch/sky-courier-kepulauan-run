@@ -194,10 +194,13 @@ function snapCamera() {
   const fx = sh * cp, fy = sp, fz = -ch * cp;
   if (state.camera === 'cockpit') {
     camera.position.set(p.x + fx * 0.6, p.y + 1.35 + fy * 0.6, p.z + fz * 0.6);
+    camera.lookAt(p.x + fx * 40, p.y + fy * 40, p.z + fz * 40);
   } else {
-    camera.position.set(p.x - fx * 20 + ch * 7, p.y - fy * 20 + 6.5, p.z - fz * 20 + sh * 7);
+    // Chase: directly behind the plane on its axis, no side offset,
+    // looking AT the plane so it sits dead-centre in the frame.
+    camera.position.set(p.x - fx * 20, p.y - fy * 20 + 8, p.z - fz * 20);
+    camera.lookAt(p.x, p.y, p.z);
   }
-  camera.lookAt(p.x + fx * 40, p.y + fy * 40, p.z + fz * 40);
 }
 
 function updateCamera(dt) {
@@ -210,12 +213,14 @@ function updateCamera(dt) {
     camera.lookAt(p.x + fx * 120, p.y + fy * 120 - 4, p.z + fz * 120);
     camera.rotateZ(p.roll);
   } else {
-    const bx = p.x - fx * 20 + ch * 7, by = p.y - fy * 20 + 6.5, bz = p.z - fz * 20 + sh * 7;
+    // Chase: directly behind the plane on its axis, no side offset,
+    // looking AT the plane so it sits dead-centre in the frame.
+    const bx = p.x - fx * 20, by = p.y - fy * 20 + 8, bz = p.z - fz * 20;
     const k = Math.min(1, dt * 4);
     camera.position.x += (bx - camera.position.x) * k;
     camera.position.y += (by - camera.position.y) * k;
     camera.position.z += (bz - camera.position.z) * k;
-    camera.lookAt(p.x + fx * 40, p.y + fy * 40, p.z + fz * 40);
+    camera.lookAt(p.x, p.y, p.z);
   }
 }
 
