@@ -1,8 +1,8 @@
 # Karst Bay Courier
 
 [![make.fun](https://make.fun/badge/best-flight-game-20261126-0057.svg?utm_source=github&utm_medium=readme)](https://make.fun/bounty/best-flight-game-20261126-0057)
-[![make.fun](https://make.fun/badge/best-flight-game-20261126-0057/entries.svg?utm_source=github&utm_medium=readme)](https://make.fun/bounty/best-flight-game-20261126-0057)
-[![make.fun](https://make.fun/badge/best-flight-game-20261126-0057/escrow.svg?utm_source=github&utm_medium=readme)](https://make.fun/bounty/best-flight-game-20261126-0057)
+[![rank](https://make.fun/badge/best-flight-game-20261126-0057/ahkamq321-glitch/sky-courier-kepulauan-run/rank.svg)](https://make.fun/bounty/best-flight-game-20261126-0057/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=best-flight-game-20261126-0057)
+[![reward](https://make.fun/badge/best-flight-game-20261126-0057/ahkamq321-glitch/sky-courier-kepulauan-run/reward.svg)](https://make.fun/bounty/best-flight-game-20261126-0057?utm_source=github&utm_medium=readme&utm_campaign=best-flight-game-20261126-0057)
 
 A real-3D courier flight game built with Three.js. Fly the bush plane PK-SKY through
 glowing rings between karst towers, past the lighthouse, and deliver the mail — at dusk,
