@@ -65,6 +65,16 @@ export function buildPlane() {
   const fin = mesh(new THREE.BoxGeometry(0.22, 2.1, 1.7), white, 0, 1.2, 4.6);
   const finTip = mesh(new THREE.BoxGeometry(0.26, 0.5, 1.7), red, 0, 2.1, 4.6);
   group.add(stab, fin, finTip);
+  // Tail detail: red tips on the stabilizer, a dorsal antenna, wing panel lines.
+  const stabTipL = mesh(new THREE.BoxGeometry(0.5, 0.26, 1.5), red, -2.4, 0.35, 4.6);
+  const stabTipR = mesh(new THREE.BoxGeometry(0.5, 0.26, 1.5), red, 2.4, 0.35, 4.6);
+  group.add(stabTipL, stabTipR);
+  const antenna = mesh(new THREE.CylinderGeometry(0.05, 0.05, 1.1, 6), dark, 0, 1.6, 1.2);
+  group.add(antenna);
+  const seamMat = std(0x3a3a3a, 0.8, 0);
+  const seamL = mesh(new THREE.BoxGeometry(6.2, 0.08, 0.35), seamMat, -3.4, 1.53, 0.1);
+  const seamR = mesh(new THREE.BoxGeometry(6.2, 0.08, 0.35), seamMat, 3.4, 1.53, 0.1);
+  group.add(seamL, seamR);
 
   // Prop: spinner cone + two blades + a translucent disc, all spinning.
   const prop = new THREE.Group();
@@ -72,11 +82,13 @@ export function buildPlane() {
   const spinner = mesh(new THREE.ConeGeometry(0.42, 1.0, 12), red, 0, 0, -0.4);
   spinner.rotation.x = -Math.PI / 2;
   const blade = mesh(new THREE.BoxGeometry(0.28, 4.4, 0.1), dark, 0, 0, 0);
+  const blade2 = mesh(new THREE.BoxGeometry(0.28, 4.4, 0.1), dark, 0, 0, 0);
+  blade2.rotation.z = Math.PI / 2;
   const disc = new THREE.Mesh(
     new THREE.CircleGeometry(2.3, 32),
-    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.10, side: THREE.DoubleSide })
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.16, side: THREE.DoubleSide })
   );
-  prop.add(spinner, blade, disc);
+  prop.add(spinner, blade, blade2, disc);
   group.add(prop);
 
   // Landing gear: two wheels + struts.

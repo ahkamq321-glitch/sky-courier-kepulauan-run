@@ -73,6 +73,39 @@ export function buildWorld(scene) {
   const sea = new THREE.Mesh(seaGeo, new THREE.MeshStandardMaterial({ color: 0x1b7f8c, roughness: 0.22, metalness: 0.55 }));
   sea.receiveShadow = true;
   scene.add(sea);
+  // Boats, buoys and whitecaps — break up the flat sea so it reads as water.
+  const boatHull = std(0x8a4a2a, 0.8, 0);
+  const boatSail = std(0xf5f2ea, 0.9, 0);
+  const buoyMat = new THREE.MeshBasicMaterial({ color: 0xff7a20 });
+  const foamMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.28 });
+  const boatSpots = [
+    { x: -260, z: 180, h: 0.6, s: 1 }, { x: 320, z: -140, h: -0.9, s: 1.3 },
+    { x: -80, z: -420, h: 2.2, s: 0.9 },
+  ];
+  for (const b of boatSpots) {
+    const boat = new THREE.Group();
+    const hull = new THREE.Mesh(new THREE.BoxGeometry(10 * b.s, 3 * b.s, 4 * b.s), boatHull);
+    hull.position.y = 1.5 * b.s; hull.castShadow = true;
+    const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 12 * b.s, 6), std(0x5a3a22, 0.9, 0));
+    mast.position.y = 8 * b.s;
+    const sail = new THREE.Mesh(new THREE.ConeGeometry(4 * b.s, 10 * b.s, 4), boatSail);
+    sail.position.set(0, 12 * b.s, -1 * b.s); sail.rotation.y = Math.PI / 4;
+    boat.add(hull, mast, sail);
+    boat.position.set(b.x, 1, b.z);
+    boat.rotation.y = b.h;
+    scene.add(boat);
+  }
+  for (const [bx, bz] of [[-140, 320], [180, 260], [60, -320], [-340, -80]]) {
+    const buoy = new THREE.Mesh(new THREE.SphereGeometry(2.2, 10, 8), buoyMat);
+    buoy.position.set(bx, 2, bz);
+    scene.add(buoy);
+  }
+  for (const [fx, fz, fr] of [[-200, 100, 26], [240, -60, 30], [40, 200, 22], [-60, -180, 28]]) {
+    const cap = new THREE.Mesh(new THREE.CircleGeometry(fr, 20), foamMat);
+    cap.rotation.x = -Math.PI / 2;
+    cap.position.set(fx, 2, fz);
+    scene.add(cap);
+  }
   // Sun glitter path: a long soft streak on the water under the sun.
   const streakCanvas = document.createElement('canvas');
   streakCanvas.width = 512; streakCanvas.height = 128;
@@ -129,6 +162,9 @@ export function buildWorld(scene) {
     tower.position.set(k.x, k.h / 2 - 4, k.z);
     tower.castShadow = true; tower.receiveShadow = true;
     scene.add(tower);
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(k.r * 0.72, k.r * 0.78, k.h * 0.14, 10), std(0x8a6a52, 1, 0));
+    band.position.set(k.x, k.h * 0.55 - 4, k.z);
+    scene.add(band);
     const cap = new THREE.Mesh(new THREE.SphereGeometry(k.r * 0.55, 10, 8), shrub);
     cap.scale.y = 0.45;
     cap.position.set(k.x, k.h - 2, k.z);
@@ -169,6 +205,24 @@ export function buildWorld(scene) {
   liFoam.rotation.x = -Math.PI / 2;
   liFoam.position.set(li.x, 0.8, li.z);
   scene.add(liRim, liTop, liFoam);
+  // Beach hut + wooden dock on the lighthouse island.
+  const hut = new THREE.Group();
+  const hutBase = new THREE.Mesh(new THREE.BoxGeometry(10, 6, 8), std(0xc9a06a, 1, 0));
+  hutBase.position.y = 3; hutBase.castShadow = true;
+  const hutRoof = new THREE.Mesh(new THREE.ConeGeometry(8, 5, 4), std(0x8a4a2a, 1, 0));
+  hutRoof.position.y = 8.5; hutRoof.rotation.y = Math.PI / 4; hutRoof.castShadow = true;
+  hut.add(hutBase, hutRoof);
+  hut.position.set(li.x + 38, 6.2, li.z - 42);
+  scene.add(hut);
+  const dock = new THREE.Group();
+  for (let i = 0; i < 5; i++) {
+    const plank = new THREE.Mesh(new THREE.BoxGeometry(3, 0.6, 8), std(0x7a5230, 1, 0));
+    plank.position.set(0, 1, i * 9);
+    dock.add(plank);
+  }
+  dock.position.set(li.x - 65, 2.5, li.z + 55);
+  dock.rotation.y = 0.5;
+  scene.add(dock);
   scene.add(palm(li.x - 50, 6.2, li.z + 40, 1.4));
   scene.add(palm(li.x + 55, 6.2, li.z + 30, 1.2));
   // Lighthouse: stacked red/white bands, dark lamp room, glowing lamp.
@@ -226,6 +280,15 @@ export function buildWorld(scene) {
     return g;
   }
   buildStrip(LAYOUT.strip.x, LAYOUT.strip.z, LAYOUT.strip.heading, LAYOUT.strip.length, 34);
+  // Windsock at the main strip: pole + orange cone.
+  const sockPole = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 26, 8), std(0xdddddd, 0.6, 0.4));
+  sockPole.position.set(LAYOUT.strip.x + 40, 13, LAYOUT.strip.z + 30);
+  sockPole.castShadow = true;
+  const sock = new THREE.Mesh(new THREE.ConeGeometry(3, 12, 10), std(0xff7a20, 0.8, 0));
+  sock.rotation.z = Math.PI / 2 - 0.25;
+  sock.position.set(LAYOUT.strip.x + 46, 25, LAYOUT.strip.z + 30);
+  sock.castShadow = true;
+  scene.add(sockPole, sock);
   for (const h of LAYOUT.hopStrips) buildStrip(h.x, h.z, h.heading, h.length, 26);
 
   // --- mountains: big dark cones far away, hazed by the fog ---
@@ -238,6 +301,9 @@ export function buildWorld(scene) {
     const cone2 = new THREE.Mesh(new THREE.ConeGeometry(m.r * 0.6, h * 0.75, 7), mtnMat);
     cone2.position.set(m.x + m.r * 0.7, h * 0.375 - 30, m.z + 100);
     scene.add(cone2);
+    const snow = new THREE.Mesh(new THREE.ConeGeometry(m.r * 0.34, h * 0.32, 7), std(0xffffff, 0.9, 0));
+    snow.position.set(m.x, h * 0.84 - 30, m.z);
+    scene.add(snow);
   }
 
   // --- clouds: clusters of flattened cream spheres, drifting slowly ---
@@ -261,6 +327,18 @@ export function buildWorld(scene) {
     g.position.set(c.x, c.y, c.z);
     scene.add(g);
     clouds.push(g);
+  }
+  // Birds: small dark V shapes drifting over the bay (static — screenshots are frozen).
+  const birdMat = new THREE.MeshBasicMaterial({ color: 0x2a2a3a });
+  for (let i = 0; i < 6; i++) {
+    const bird = new THREE.Group();
+    const w1 = new THREE.Mesh(new THREE.BoxGeometry(4.5, 0.35, 1.0), birdMat);
+    w1.rotation.z = 0.5; w1.position.x = -2.0;
+    const w2 = new THREE.Mesh(new THREE.BoxGeometry(4.5, 0.35, 1.0), birdMat);
+    w2.rotation.z = -0.5; w2.position.x = 2.0;
+    bird.add(w1, w2);
+    bird.position.set(-500 + i * 220, 175 + (i % 3) * 18, -100 + (i % 2) * 300);
+    scene.add(bird);
   }
 
   return {
