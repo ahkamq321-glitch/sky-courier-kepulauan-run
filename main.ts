@@ -1,9 +1,9 @@
-// Sky Courier — Kepulauan Run: the hand-in program (Node 22, standard library only).
-// The game is this directory's game/ folder, plain static files a desktop browser
-// loads offline (game/index.html and its ES modules, no library and no network
-// request), and the program hands it in. It copies game/ and screenshots/ from
-// beside this file to /output and writes /output/dossier.json, the summary the
-// judge reads, with the vendored make.fun library.
+// Karst Bay Courier (REAL 3D) — the hand-in program (Node 22, standard library only).
+// The game is this directory's game/ folder: a real 3D flight game built on Three.js
+// (vendored under game/vendor/, no network), plain static files a desktop browser
+// loads offline (game/index.html and its modules). The program hands it in: it copies
+// game/ and screenshots/ from beside this file to /output and writes
+// /output/dossier.json, the summary the judge reads, with the vendored make.fun library.
 //
 // Serve it locally with a static server over game/, then open game/index.html.
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:

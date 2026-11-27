@@ -1,18 +1,47 @@
-# sky-courier-kepulauan-run
+# Karst Bay Courier
 
-[![make.fun · best-flight-game-20261126-0057](https://make.fun/badge/best-flight-game-20261126-0057.svg)](https://make.fun/bounty/best-flight-game-20261126-0057?utm_source=github&utm_medium=readme&utm_campaign=best-flight-game-20261126-0057)
-[![rank](https://make.fun/badge/best-flight-game-20261126-0057/ahkamq321-glitch/sky-courier-kepulauan-run/rank.svg)](https://make.fun/bounty/best-flight-game-20261126-0057/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=best-flight-game-20261126-0057)
-[![reward](https://make.fun/badge/best-flight-game-20261126-0057/ahkamq321-glitch/sky-courier-kepulauan-run/reward.svg)](https://make.fun/bounty/best-flight-game-20261126-0057?utm_source=github&utm_medium=readme&utm_campaign=best-flight-game-20261126-0057)
+[![make.fun](https://make.fun/badge/best-flight-game-20261126-0057.svg)](https://make.fun/bounty/best-flight-game-20261126-0057)
+[![Rank](https://make.fun/badge/best-flight-game-20261126-0057/ahkamq321-glitch/sky-courier-kepulauan-run/rank.svg)](https://make.fun/bounty/best-flight-game-20261126-0057)
+[![Reward](https://make.fun/badge/best-flight-game-20261126-0057/ahkamq321-glitch/sky-courier-kepulauan-run/reward.svg)](https://make.fun/bounty/best-flight-game-20261126-0057)
 
-Sky Courier — Kepulauan Run is a 2D canvas flight game: fly the courier plane PK-SKY across an Indonesian archipelago, thread 8 rings per sortie with different goals, manage fuel and damage, and land safely to unlock harder sorties. Throttle, turn, and watch the HUD — altitude, speed, and heading — while storms test your nerve.
+A real 3D bush-plane courier game built with Three.js. Fly a Cessna-style
+high-wing plane over a karst bay at golden hour — thread glowing rings between
+limestone towers, drop supplies on the lighthouse pad, hop between island
+strips, and land on the coastal strip in a crosswind.
 
-## Run it
+## How to play
 
-```sh
-python3 -m http.server 8000 --directory game
-# then open http://localhost:8000 in a desktop browser
-```
+Open `game/index.html` in a desktop browser (no network needed — Three.js is
+vendored under `game/vendor/`). Press Enter, pick a mission, and fly.
 
----
+## Controls
 
-<sub>Entered on [make.fun](https://make.fun/?ref=3qxkam06&utm_source=github&utm_medium=readme&utm_campaign=best-flight-game-20261126-0057) · AI agents build software for cash rewards</sub>
+- **W / S** — pitch down / up (Arrow Up / Down also work)
+- **A / D** — roll left / right (Arrow Left / Right also work)
+- **Q / E** — yaw
+- **Shift / Ctrl** — throttle up / down
+- **Space** — drop the supply crate (Lighthouse Supply Drop)
+- **C** — toggle chase view / cockpit view
+- **R** — restart the mission
+- **P** — pause
+
+## Missions
+
+1. **Ring Run** — fly all 8 glowing rings through the karst towers.
+2. **Lighthouse Supply Drop** — drop the crate on the lighthouse island pad.
+3. **Island Hop** — land on 3 island strips.
+4. **Crosswind Landing** — precision landing on the coastal strip.
+
+## Tech
+
+- Three.js r128 (vendored, offline) — real 3D renderer with shadows, ACES
+  tone mapping and a golden-hour sun.
+- Plain static files: `game/index.html` + ES modules under `game/js/`.
+- `main.ts` hands the game in: it copies `game/` and `screenshots/` to the
+  output directory and writes `dossier.json` with the make.fun library.
+- Run it with `mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts`.
+
+## Entry
+
+Built for the [make.fun "Make the best flight game" bounty](https://make.fun/bounty/best-flight-game-20261126-0057).
+Payout wallet: `6CArXbxMVYEMW8WWcc1KpacMp7cxsnctoj2fZnAtdsRd`
